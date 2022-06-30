@@ -18,5 +18,5 @@ export JULIA_NUM_THREADS=48
 
 # Run Julia
 cd /g/data/v45/nc3020/ASC-idealised/
-/g/data/v45/nc3020/julia/julia --color=yes --project=docs asc.jl > $PBS_JOBID.log
+/g/data/v45/nc3020/julia/julia --color=yes --project asc.jl > $PBS_JOBID.log
 
