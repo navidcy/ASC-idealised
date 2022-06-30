@@ -1,10 +1,11 @@
 using Oceananigans
 using Oceananigans.Units
+using Oceananigans.Grids: xnode, ynode, znode
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: FFTImplicitFreeSurfaceSolver
 using Printf
 
-architecture = CPU()
+architecture = GPU()
 
 save_fields_interval = 7days
 stop_time = 0.2years
@@ -31,6 +32,7 @@ shelf(x, y) = -(H + h)/2 - (H - h)/2 * tanh(y / width_shelf)
 bump_amplitude = 50
 width_bump = 10kilometers
 
+# let's add a bump to break the homogeneity in zonal direction
 x_bump, y_bump = 0, 200kilometers
 bump(x, y) = bump_amplitude * exp(-((x - x_bump)^2 + (y - y_bump)^2) / 2width_bump^2)
 
@@ -39,11 +41,6 @@ bathymetry(x, y) = shelf(x, y) + bump(x, y)
 grid = ImmersedBoundaryGrid(grid, GridFittedBottom(bathymetry))
 
 @info "Built a grid: $grid."
-
-#free_surface = ImplicitFreeSurface()
-fft_preconditioner = FFTImplicitFreeSurfaceSolver(grid.underlying_grid)
-free_surface = ImplicitFreeSurface(solver_method=:PreconditionedConjugateGradient, preconditioner=fft_preconditioner)
-# free_surface = ImplicitFreeSurface(solver_method=:HeptadiagonalIterativeSolver)
 
 # Physics
 Δx = grid.Lx / grid.Nx
@@ -68,6 +65,8 @@ parameters = (Ly = Ly,
               Lz = Lz,    
               Qᵇ = 10 / (ρ * cᵖ) * α * g,          # buoyancy flux magnitude [m² s⁻³]    
               y_shutoff = 5/6 * Ly,                # shutoff location for buoyancy flux [m]
+              y_salt_shutoff = - Ly/4,             # shutoff location for buoyancy flux [m]
+              Qsalt = 1.0,                         # ... some units for salt flux
               τ = 0.2/ρ,                           # surface kinematic wind stress [m² s⁻²]
               μ = 1 / 30days,                      # bottom drag damping time-scale [s⁻¹]
               ΔB = 8 * α * g,                      # surface vertical buoyancy gradient [s⁻²]
@@ -78,6 +77,29 @@ parameters = (Ly = Ly,
 )
 
 
+@inline function u_stress(i, j, grid, clock, model_fields, p)
+    y = ynode(Center(), j, grid)
+    return p.τ * sin(π * y / p.Ly)
+end
+
+u_stress_bc = FluxBoundaryCondition(u_stress, discrete_form=true, parameters=parameters)
+
+# Bottom drag
+@inline u_drag(i, j, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.u[i, j, 1] 
+@inline v_drag(i, j, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.v[i, j, 1]
+
+u_drag_bc = FluxBoundaryCondition(u_drag, discrete_form=true; parameters)
+v_drag_bc = FluxBoundaryCondition(v_drag, discrete_form=true; parameters)
+
+@inline u_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.u[i, j, k]    
+u_immersed_drag_bc = FluxBoundaryCondition(u_immersed_drag, discrete_form=true, parameters=parameters)
+
+@inline v_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.v[i, j, k]    
+v_immersed_drag_bc = FluxBoundaryCondition(u_immersed_drag, discrete_form=true, parameters=parameters)
+
+u_bcs = FieldBoundaryConditions(top = u_stress_bc, bottom = u_drag_bc, immersed = u_immersed_drag_bc)
+v_bcs = FieldBoundaryConditions(bottom = v_drag_bc, immersed = v_immersed_drag_bc)
+
 @inline function buoyancy_flux(i, j, grid, clock, model_fields, p)
     y = ynode(Center(), j, grid)
     return ifelse(y < p.y_shutoff, p.Qᵇ * cos(3π * y / p.Ly), 0.0)
@@ -85,23 +107,21 @@ end
 
 buoyancy_flux_bc = FluxBoundaryCondition(buoyancy_flux, discrete_form=true, parameters=parameters)
 
-@inline function u_stress(i, j, grid, clock, model_fields, p)
-    y = ynode(Center(), j, grid)
-    return - p.τ * sin(π * y / p.Ly)
-end
-
-u_stress_bc = FluxBoundaryCondition(u_stress, discrete_form=true, parameters=parameters)
-
-@inline u_drag(i, j, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.u[i, j, 1] 
-@inline v_drag(i, j, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.v[i, j, 1]
-
-u_drag_bc = FluxBoundaryCondition(u_drag, discrete_form=true; parameters)
-v_drag_bc = FluxBoundaryCondition(v_drag, discrete_form=true; parameters)
-
 b_bcs = FieldBoundaryConditions(top = buoyancy_flux_bc)
 
-u_bcs = FieldBoundaryConditions(top = u_stress_bc, bottom = u_drag_bc, immersed = u_drag_bc)
-v_bcs = FieldBoundaryConditions(bottom = v_drag_bc, immersed = v_drag_bc)
+
+@inline function salf_flux(i, j, grid, clock, model_fields, p)
+    y = ynode(Center(), j, grid)
+    return ifelse(y < p.y_salt_shutoff, -p.Qsalt, 0.0)
+end
+
+salt_flux_bc = FluxBoundaryCondition(salf_flux, discrete_form=true, parameters=parameters)
+
+S_bcs = FieldBoundaryConditions(top = salt_flux_bc)
+
+
+buoyancy = SeawaterBuoyancy(equation_of_state=LinearEquationOfState(thermal_expansion=2e-3, haline_contraction=5e-4))
+
 
 #####
 ##### Coriolis
@@ -117,16 +137,24 @@ coriolis = BetaPlane(; f₀, β)
 
 @info "Building a model..."
 
+#free_surface = ImplicitFreeSurface()
+fft_preconditioner = FFTImplicitFreeSurfaceSolver(grid.underlying_grid)
+free_surface = ImplicitFreeSurface(solver_method=:PreconditionedConjugateGradient, preconditioner=fft_preconditioner)
+# free_surface = ImplicitFreeSurface(solver_method=:HeptadiagonalIterativeSolver)
+
 model = HydrostaticFreeSurfaceModel(; grid,
                                     free_surface,
                                     coriolis,
-                                    buoyancy = BuoyancyTracer(),
+                                    buoyancy,
                                     closure = (diffusive_closure, horizontal_closure, convective_adjustment),
-                                    tracers = (:b, :c),
+                                    tracers = (:T, :S, :c),
                                     momentum_advection = WENO5(),
-                                    tracer_advection = WENO5())
+                                    tracer_advection = WENO5(),
+                                    boundary_conditions = (S=S_bcs, u=u_bcs, v=v_bcs),
+                                    )
 
 @info "Built $model."
+
 
 
 #####
@@ -135,17 +163,18 @@ model = HydrostaticFreeSurfaceModel(; grid,
 
 # resting initial condition
 ε(σ) = σ * randn()
-bᵢ(x, y, z) = parameters.ΔB * ( exp(z/parameters.h) - exp(-Lz / parameters.h) ) / (1 - exp(-Lz / parameters.h)) + ε(1e-8)
 uᵢ(x, y, z) = ε(1e-8)
 vᵢ(x, y, z) = ε(1e-8)
 wᵢ(x, y, z) = ε(1e-8)
+Tᵢ(x, y, z) = ε(1e-8)
+Sᵢ(x, y, z) = ε(1e-8)
 
 Δy = 100kilometers
 Δz = 100
 Δc = 2Δy
 cᵢ(x, y, z) = exp(-y^2 / 2Δc^2) * exp(-(z + Lz/4)^2 / 2Δz^2)
 
-set!(model, b=bᵢ, u=uᵢ, v=vᵢ, w=wᵢ, c=cᵢ)
+set!(model, S=Sᵢ, T=Tᵢ, u=uᵢ, v=vᵢ, w=wᵢ, c=cᵢ)
 
 #####
 ##### Simulation building
@@ -188,25 +217,28 @@ simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterv
 #####
 
 u, v, w = model.velocities
-b, c = model.tracers.b, model.tracers.c
+T, S, c = model.tracers.T, model.tracers.S, model.tracers.c
 
-ζ = Field(∂x(v) - ∂y(u))
+# ζ = Field(∂x(v) - ∂y(u))
 
-B = Field(Average(b, dims=1))
-U = Field(Average(u, dims=1))
-V = Field(Average(v, dims=1))
-W = Field(Average(w, dims=1))
+# B = Field(Average(b, dims=1))
+# U = Field(Average(u, dims=1))
+# V = Field(Average(v, dims=1))
+# W = Field(Average(w, dims=1))
 
-b′ = b - B
-v′ = v - V
-w′ = w - W
+# b′ = b - B
+# v′ = v - V
+# w′ = w - W
 
-v′b′ = Field(Average(v′ * b′, dims=1))
-w′b′ = Field(Average(w′ * b′, dims=1))
+# v′b′ = Field(Average(v′ * b′, dims=1))
+# w′b′ = Field(Average(w′ * b′, dims=1))
 
-outputs = (; b, ζ, u)
+# outputs = (; b, ζ, u)
 
-averaged_outputs = (; v′b′, w′b′, B, U)
+# averaged_outputs = (; v′b′, w′b′, B, U)
+
+outputs = (; u, v, w, T, S, c)
+
 
 #####
 ##### Build checkpointer and output writer
@@ -217,6 +249,14 @@ simulation.output_writers[:checkpointer] = Checkpointer(model,
                                                         prefix = filename,
                                                         overwrite_existing = true)
 
+simulation.output_writers[:velocities] = JLD2OutputWriter(model, (; u, v, w);
+                                                          filename = filename * "_velocities",
+                                                          schedule = TimeInterval(save_fields_interval))
+
+simulation.output_writers[:tracers] = JLD2OutputWriter(model, (; T, S, c);
+                                                       filename = filename * "_tracers",
+                                                       schedule = TimeInterval(save_fields_interval))
+#=
 slicers = (west = (1, :, :),
            east = (grid.Nx, :, :),
            south = (:, 1, :),
@@ -237,7 +277,7 @@ simulation.output_writers[:zonal] = JLD2OutputWriter(model, (b=B, u=U),#, v=V, w
                                                      schedule = TimeInterval(save_fields_interval),
                                                      filename = filename * "_zonal_average",
                                                      overwrite_existing = true)
-#=
+
 simulation.output_writers[:averages] = JLD2OutputWriter(model, averaged_outputs,
                                                         schedule = AveragedTimeInterval(1days, window=1days, stride=1),
                                                         filename = filename * "_averages",
