@@ -6,6 +6,12 @@ using Printf
 
 architecture = CPU()
 
+save_fields_interval = 7days
+stop_time = 0.2years
+Δt₀ = 5minutes
+
+filename = "asc_channel"
+
 grid = RectilinearGrid(architecture,
                        topology = (Periodic, Bounded, Bounded), 
                        size = (128, 128, 16),
@@ -35,9 +41,9 @@ grid = ImmersedBoundaryGrid(grid, GridFittedBottom(bathymetry))
 @info "Built a grid: $grid."
 
 #free_surface = ImplicitFreeSurface()
-# fft_preconditioner = FFTImplicitFreeSurfaceSolver(grid.underlying_grid)
-# free_surface = ImplicitFreeSurface(solver_method=:PreconditionedConjugateGradient, preconditioner=fft_preconditioner)
-free_surface = ImplicitFreeSurface(solver_method=:HeptadiagonalIterativeSolver)
+fft_preconditioner = FFTImplicitFreeSurfaceSolver(grid.underlying_grid)
+free_surface = ImplicitFreeSurface(solver_method=:PreconditionedConjugateGradient, preconditioner=fft_preconditioner)
+# free_surface = ImplicitFreeSurface(solver_method=:HeptadiagonalIterativeSolver)
 
 # Physics
 Δx = grid.Lx / grid.Nx
@@ -89,22 +95,21 @@ u_stress_bc = FluxBoundaryCondition(u_stress, discrete_form=true, parameters=par
 @inline u_drag(i, j, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.u[i, j, 1] 
 @inline v_drag(i, j, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.v[i, j, 1]
 
-u_drag_bc = FluxBoundaryCondition(u_drag, discrete_form=true, parameters=parameters)
-v_drag_bc = FluxBoundaryCondition(v_drag, discrete_form=true, parameters=parameters)
+u_drag_bc = FluxBoundaryCondition(u_drag, discrete_form=true; parameters)
+v_drag_bc = FluxBoundaryCondition(v_drag, discrete_form=true; parameters)
 
 b_bcs = FieldBoundaryConditions(top = buoyancy_flux_bc)
 
-u_bcs = FieldBoundaryConditions(top = u_stress_bc, bottom = u_drag_bc)
-v_bcs = FieldBoundaryConditions(bottom = v_drag_bc)
+u_bcs = FieldBoundaryConditions(top = u_stress_bc, bottom = u_drag_bc, immersed = u_drag_bc)
+v_bcs = FieldBoundaryConditions(bottom = v_drag_bc, immersed = v_drag_bc)
 
 #####
 ##### Coriolis
 #####
 
-const f = -1e-4     # [s⁻¹]
+const f₀ = -1e-4     # [s⁻¹]
 const β =  1e-11    # [m⁻¹ s⁻¹]
-coriolis = BetaPlane(f₀ = f, β = β)
-
+coriolis = BetaPlane(; f₀, β)
 
 #####
 ##### Model building
@@ -112,7 +117,9 @@ coriolis = BetaPlane(f₀ = f, β = β)
 
 @info "Building a model..."
 
-model = HydrostaticFreeSurfaceModel(; grid, free_surface, coriolis,
+model = HydrostaticFreeSurfaceModel(; grid,
+                                    free_surface,
+                                    coriolis,
                                     buoyancy = BuoyancyTracer(),
                                     closure = (diffusive_closure, horizontal_closure, convective_adjustment),
                                     tracers = (:b, :c),
@@ -120,3 +127,126 @@ model = HydrostaticFreeSurfaceModel(; grid, free_surface, coriolis,
                                     tracer_advection = WENO5())
 
 @info "Built $model."
+
+
+#####
+##### Initial conditions
+#####
+
+# resting initial condition
+ε(σ) = σ * randn()
+bᵢ(x, y, z) = parameters.ΔB * ( exp(z/parameters.h) - exp(-Lz / parameters.h) ) / (1 - exp(-Lz / parameters.h)) + ε(1e-8)
+uᵢ(x, y, z) = ε(1e-8)
+vᵢ(x, y, z) = ε(1e-8)
+wᵢ(x, y, z) = ε(1e-8)
+
+Δy = 100kilometers
+Δz = 100
+Δc = 2Δy
+cᵢ(x, y, z) = exp(-y^2 / 2Δc^2) * exp(-(z + Lz/4)^2 / 2Δz^2)
+
+set!(model, b=bᵢ, u=uᵢ, v=vᵢ, w=wᵢ, c=cᵢ)
+
+#####
+##### Simulation building
+
+simulation = Simulation(model, Δt=Δt₀, stop_time=stop_time)
+
+# add timestep wizardrogress callback
+wizard = TimeStepWizard(cfl=0.2, max_change=1.1, max_Δt=20minutes)
+
+simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(20))
+
+# add progress callback
+# Also, we add a callback to print a message about how the simulation is going,
+
+using Printf
+
+wall_clock = [time_ns()]
+
+function print_progress(sim)
+    @printf("[%05.2f%%] i: %d, t: %s, wall time: %s, max(u): (%6.3e, %6.3e, %6.3e) m/s, next Δt: %s\n",
+            100 * (sim.model.clock.time / sim.stop_time),
+            sim.model.clock.iteration,
+            prettytime(sim.model.clock.time),
+            prettytime(1e-9 * (time_ns() - wall_clock[1])),
+            maximum(abs, sim.model.velocities.u),
+            maximum(abs, sim.model.velocities.v),
+            maximum(abs, sim.model.velocities.w),
+            prettytime(sim.Δt))
+
+    wall_clock[1] = time_ns()
+    
+    return nothing
+end
+
+simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterval(100))
+
+
+#####
+##### Diagnostics
+#####
+
+u, v, w = model.velocities
+b, c = model.tracers.b, model.tracers.c
+
+ζ = Field(∂x(v) - ∂y(u))
+
+B = Field(Average(b, dims=1))
+U = Field(Average(u, dims=1))
+V = Field(Average(v, dims=1))
+W = Field(Average(w, dims=1))
+
+b′ = b - B
+v′ = v - V
+w′ = w - W
+
+v′b′ = Field(Average(v′ * b′, dims=1))
+w′b′ = Field(Average(w′ * b′, dims=1))
+
+outputs = (; b, ζ, u)
+
+averaged_outputs = (; v′b′, w′b′, B, U)
+
+#####
+##### Build checkpointer and output writer
+#####
+
+simulation.output_writers[:checkpointer] = Checkpointer(model,
+                                                        schedule = TimeInterval(1years),
+                                                        prefix = filename,
+                                                        overwrite_existing = true)
+
+slicers = (west = (1, :, :),
+           east = (grid.Nx, :, :),
+           south = (:, 1, :),
+           north = (:, grid.Ny, :),
+           bottom = (:, :, 1),
+           top = (:, :, grid.Nz))
+
+for side in keys(slicers)
+    indices = slicers[side]
+
+    simulation.output_writers[side] = JLD2OutputWriter(model, outputs;
+                                                       filename = filename * "_$(side)_slice",
+                                                       schedule = TimeInterval(save_fields_interval),
+                                                       indices)
+end
+
+simulation.output_writers[:zonal] = JLD2OutputWriter(model, (b=B, u=U),#, v=V, w=W, vb=v′b′, wb=w′b′),
+                                                     schedule = TimeInterval(save_fields_interval),
+                                                     filename = filename * "_zonal_average",
+                                                     overwrite_existing = true)
+#=
+simulation.output_writers[:averages] = JLD2OutputWriter(model, averaged_outputs,
+                                                        schedule = AveragedTimeInterval(1days, window=1days, stride=1),
+                                                        filename = filename * "_averages",
+                                                        verbose = true,
+                                                        overwrite_existing = true)
+=#
+
+@info "Running the simulation..."
+
+run!(simulation)
+
+@info "Simulation completed in " * prettytime(simulation.run_wall_time)
