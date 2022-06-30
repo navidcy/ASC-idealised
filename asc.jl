@@ -66,7 +66,7 @@ parameters = (Ly = Ly,
               Qᵇ = 10 / (ρ * cᵖ) * α * g,          # buoyancy flux magnitude [m² s⁻³]    
               y_shutoff = 5/6 * Ly,                # shutoff location for buoyancy flux [m]
               y_salt_shutoff = - Ly/4,             # shutoff location for buoyancy flux [m]
-              Qsalt = - 2.5e-3,                    # ... some units for salt flux
+              Qsalt = 2.5e-3,                      # ... some units for salt flux
               τ = 0.1/ρ,                           # surface kinematic wind stress [m² s⁻²]
               μ = 1 / 30days,                      # bottom drag damping time-scale [s⁻¹]
               ΔB = 8 * α * g,                      # surface vertical buoyancy gradient [s⁻²]
