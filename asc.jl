@@ -45,10 +45,14 @@ grid = ImmersedBoundaryGrid(grid, GridFittedBottom(bathymetry))
 # Physics
 Δx = grid.Lx / grid.Nx
 κ₄h = Δx^4 / 1day
-κz = 1e-2
 
-diffusive_closure = VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(), ν=κz, κ=κz)
-horizontal_closure = HorizontalScalarBiharmonicDiffusivity(ν=κ₄h, κ=κ₄h)
+ν  = 12          # [m² s⁻¹]
+νz = 3e-4        # [m² s⁻¹]
+κz = 5e-6        # [m² s⁻¹]
+
+vertical_diffusivities = VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(), ν=νz, κ=κz)
+horizontal_viscosity = HorizontalScalarDiffusivity(; ν)
+horizontal_biharmonic = HorizontalScalarBiharmonicDiffusivity(ν=κ₄h, κ=κ₄h)
 convective_adjustment = ConvectiveAdjustmentVerticalDiffusivity(convective_κz = 1.0,
                                                                 convective_νz = 0.0)
 
@@ -66,7 +70,7 @@ parameters = (Ly = Ly,
               Qᵇ = 10 / (ρ * cᵖ) * α * g,          # buoyancy flux magnitude [m² s⁻³]    
               y_shutoff = 5/6 * Ly,                # shutoff location for buoyancy flux [m]
               y_salt_shutoff = - Ly/4,             # shutoff location for buoyancy flux [m]
-              Qsalt = 2.5e-3,                      # ... some units for salt flux
+              Qsalt = - 2.5e-3,                    # ... some units for salt flux
               τ = 0.1/ρ,                           # surface kinematic wind stress [m² s⁻²]
               μ = 1 / 30days,                      # bottom drag damping time-scale [s⁻¹]
               ΔB = 8 * α * g,                      # surface vertical buoyancy gradient [s⁻²]
@@ -146,7 +150,10 @@ model = HydrostaticFreeSurfaceModel(; grid,
                                     free_surface,
                                     coriolis,
                                     buoyancy,
-                                    closure = (diffusive_closure, horizontal_closure, convective_adjustment),
+                                    closure = (vertical_diffusivities,
+                                               horizontal_viscosity,
+                                               horizontal_biharmonic,
+                                               convective_adjustment),
                                     tracers = (:T, :S, :c),
                                     momentum_advection = WENO5(),
                                     tracer_advection = WENO5(),
@@ -181,7 +188,7 @@ set!(model, S=Sᵢ, T=Tᵢ, u=uᵢ, v=vᵢ, w=wᵢ, c=cᵢ)
 
 simulation = Simulation(model, Δt=Δt₀, stop_time=stop_time)
 
-# add timestep wizardrogress callback
+# add timestep wizard callback
 wizard = TimeStepWizard(cfl=0.2, max_change=1.1, max_Δt=20minutes)
 
 simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(20))
