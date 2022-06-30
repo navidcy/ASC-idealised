@@ -36,7 +36,7 @@ width_bump = 10kilometers
 x_bump, y_bump = 0, 200kilometers
 bump(x, y) = bump_amplitude * exp(-((x - x_bump)^2 + (y - y_bump)^2) / 2width_bump^2)
 
-bathymetry(x, y) = shelf(x, y) + bump(x, y)
+bathymetry(x, y) = shelf(x, y)
 
 grid = ImmersedBoundaryGrid(grid, GridFittedBottom(bathymetry))
 
@@ -66,8 +66,8 @@ parameters = (Ly = Ly,
               Qᵇ = 10 / (ρ * cᵖ) * α * g,          # buoyancy flux magnitude [m² s⁻³]    
               y_shutoff = 5/6 * Ly,                # shutoff location for buoyancy flux [m]
               y_salt_shutoff = - Ly/4,             # shutoff location for buoyancy flux [m]
-              Qsalt = 1.0,                         # ... some units for salt flux
-              τ = 0.2/ρ,                           # surface kinematic wind stress [m² s⁻²]
+              Qsalt = - 2.5e-3,                    # ... some units for salt flux
+              τ = 0.1/ρ,                           # surface kinematic wind stress [m² s⁻²]
               μ = 1 / 30days,                      # bottom drag damping time-scale [s⁻¹]
               ΔB = 8 * α * g,                      # surface vertical buoyancy gradient [s⁻²]
               H = Lz,                              # domain depth [m]
@@ -112,7 +112,7 @@ b_bcs = FieldBoundaryConditions(top = buoyancy_flux_bc)
 
 @inline function salf_flux(i, j, grid, clock, model_fields, p)
     y = ynode(Center(), j, grid)
-    return ifelse(y < p.y_salt_shutoff, -p.Qsalt, 0.0)
+    return ifelse(y < p.y_salt_shutoff, - p.Qsalt, 0.0)
 end
 
 salt_flux_bc = FluxBoundaryCondition(salf_flux, discrete_form=true, parameters=parameters)
@@ -219,26 +219,25 @@ simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterv
 u, v, w = model.velocities
 T, S, c = model.tracers.T, model.tracers.S, model.tracers.c
 
-# ζ = Field(∂x(v) - ∂y(u))
+#=
+ζ = Field(∂x(v) - ∂y(u))
 
-# B = Field(Average(b, dims=1))
-# U = Field(Average(u, dims=1))
-# V = Field(Average(v, dims=1))
-# W = Field(Average(w, dims=1))
+B = Field(Average(b, dims=1))
+U = Field(Average(u, dims=1))
+V = Field(Average(v, dims=1))
+W = Field(Average(w, dims=1))
 
-# b′ = b - B
-# v′ = v - V
-# w′ = w - W
+b′ = b - B
+v′ = v - V
+w′ = w - W
 
-# v′b′ = Field(Average(v′ * b′, dims=1))
-# w′b′ = Field(Average(w′ * b′, dims=1))
+v′b′ = Field(Average(v′ * b′, dims=1))
+w′b′ = Field(Average(w′ * b′, dims=1))
 
-# outputs = (; b, ζ, u)
+outputs = (; b, ζ, u)
 
-# averaged_outputs = (; v′b′, w′b′, B, U)
-
-outputs = (; u, v, w, T, S, c)
-
+averaged_outputs = (; v′b′, w′b′, B, U)
+=#
 
 #####
 ##### Build checkpointer and output writer
@@ -249,13 +248,13 @@ simulation.output_writers[:checkpointer] = Checkpointer(model,
                                                         prefix = filename,
                                                         overwrite_existing = true)
 
-simulation.output_writers[:velocities] = JLD2OutputWriter(model, (; u, v, w);
-                                                          filename = filename * "_velocities",
-                                                          schedule = TimeInterval(save_fields_interval))
+simulation.output_writers[:velocities] = NetCDFOutputWriter(model, (; u, v, w);
+                                                            filename = "./ASC_output/" * filename * "_velocities",
+                                                            schedule = TimeInterval(save_fields_interval))
 
-simulation.output_writers[:tracers] = JLD2OutputWriter(model, (; T, S, c);
-                                                       filename = filename * "_tracers",
-                                                       schedule = TimeInterval(save_fields_interval))
+simulation.output_writers[:tracers] = NetCDFOutputWriter(model, (; T, S, c);
+                                                         filename = "./ASC_output/" * filename * "_tracers",
+                                                         schedule = TimeInterval(save_fields_interval))
 #=
 slicers = (west = (1, :, :),
            east = (grid.Nx, :, :),
