@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -q normal
+#PBS -q gpuvolta
 #PBS -P x77
 #PBS -l ncpus=12
 #PBS -l ngpus=1
