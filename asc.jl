@@ -36,7 +36,7 @@ width_bump = 10kilometers
 x_bump, y_bump = 0, 200kilometers
 bump(x, y) = bump_amplitude * exp(-((x - x_bump)^2 + (y - y_bump)^2) / 2width_bump^2)
 
-
+# We don't add a bump here because we add noise as an initial condition
 bathymetry(x, y) = shelf(x, y)
 
 grid = ImmersedBoundaryGrid(grid, GridFittedBottom(bathymetry))
@@ -44,6 +44,7 @@ grid = ImmersedBoundaryGrid(grid, GridFittedBottom(bathymetry))
 @info "Built a grid: $grid."
 
 ## Check the biharmonic diffusivity used by Thompson and Stewart, 2014.
+## Keeping these terms the default pending feedback from Andrew Thompson.
 
 # Physics
 Δx = grid.Lx / grid.Nx
@@ -70,37 +71,39 @@ cᵖ = 3994.0   # [J K⁻¹] heat capacity
 parameters = (Ly = Ly,  
               Lz = Lz,    
               y_salt_shutoff = - (Ly-50kilometers),# shutoff location for salt flux [km]
-              Qsalt = 2.5e-3,                     # salt input (into the domain) [gm^{-2}s^{-1}]
-              τ = 0.1/ρ,                           # surface kinematic wind stress [m² s⁻²]
+              Qsalt = 2.5e-3,                      # salt input (into the domain) [gm^{-2}s^{-1}]
+              τ = 0.075/ρ,                         # surface kinematic wind stress [m² s⁻²]
               Qᵇ = 10 / (ρ * cᵖ) * α * g,          # buoyancy flux magnitude [m² s⁻³]    
               y_shutoff = 5/6 * Ly,                # shutoff location for buoyancy flux [m]
-              μ = 1 / 30days,                      # bottom drag damping time-scale [s⁻¹]
+              ## TS14 use a linear drag coefficient of 1e-3 ms^{-1}, how does that compare to this? 
+	      μ = 1 / 30days,                      # bottom drag damping time-scale [s⁻¹]
               ΔB = 8 * α * g,                      # surface vertical buoyancy gradient [s⁻²]
               H = Lz,                              # domain depth [m]
               h = 1000.0,                          # exponential decay scale of stable stratification [m]
-              y_sponge = 19/20 * Ly,               # southern boundary of sponge layer [m]
-              λt = 7.0days                         # relaxation time scale [s]
-)
-
+              y_sponge = -200 kilometers,          # southern boundary of sponge layer [km]
+              λt = 56.0days                        # relaxation time scale for T,S  [s]
+	      ## Can we have an additional relaxation timescale here for velocity damping? ##
+	      \lambdau = 26.0days                   # relaxation time scale for u,v and w 
+	      )
 
 @inline function u_stress(i, j, grid, clock, model_fields, p)
     y = ynode(Center(), j, grid)
-    return p.τ * sin(π * y / p.Ly)
+    ## TO DO: Modify tau profile to match TS14
+    return ifelse(y>p.y_salt_shutoff, p.τ * sin(π * y / p.Ly), 0.0)
 end
 
 # Zonal wind stress
 u_stress_bc = FluxBoundaryCondition(u_stress, discrete_form=true, parameters=parameters)
 
 # Bottom drag
+## Is this the same as having a linear drag coefficient? ##
 @inline u_drag(i, j, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.u[i, j, 1] 
 @inline v_drag(i, j, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.v[i, j, 1]
 
 u_drag_bc = FluxBoundaryCondition(u_drag, discrete_form=true; parameters)
 v_drag_bc = FluxBoundaryCondition(v_drag, discrete_form=true; parameters)
 
-@inline u_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.u[i, j, k]    
-@inline v_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.v[i, j, k]    
-
+@inline u_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.u[i, j, k] @inline v_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.v[i, j, k]    
 u_immersed_drag_bc = FluxBoundaryCondition(u_immersed_drag, discrete_form=true, parameters=parameters)
 v_immersed_drag_bc = FluxBoundaryCondition(u_immersed_drag, discrete_form=true, parameters=parameters)
 
@@ -108,6 +111,7 @@ u_bcs = FieldBoundaryConditions(top = u_stress_bc, bottom = u_drag_bc, immersed 
 v_bcs = FieldBoundaryConditions(bottom = v_drag_bc, immersed = v_immersed_drag_bc)
 
 #=
+## We don't need a buoyancy flux here ##
 @inline function buoyancy_flux(i, j, grid, clock, model_fields, p)
     y = ynode(Center(), j, grid)
     return ifelse(y < p.y_shutoff, p.Qᵇ * cos(3π * y / p.Ly), 0.0)
@@ -140,6 +144,7 @@ coriolis = BetaPlane(; f₀, β)
 ##### Buoyancy model
 #####
 
+## We need the 25 term EOS from TS14 ##
 buoyancy = SeawaterBuoyancy(equation_of_state=LinearEquationOfState(thermal_expansion=2e-3, haline_contraction=5e-4))
 
 
@@ -152,6 +157,8 @@ buoyancy = SeawaterBuoyancy(equation_of_state=LinearEquationOfState(thermal_expa
 fft_preconditioner = FFTImplicitFreeSurfaceSolver(grid.underlying_grid)
 free_surface = ImplicitFreeSurface(solver_method=:PreconditionedConjugateGradient, preconditioner=fft_preconditioner)
 # free_surface = ImplicitFreeSurface(solver_method=:HeptadiagonalIterativeSolver)
+
+## I assume this is where the sponge is implemented? ##
 
 model = HydrostaticFreeSurfaceModel(; grid,
                                     free_surface,
@@ -187,6 +194,7 @@ Sᵢ(x, y, z) = ε(1e-8)
 
 Δy = 100kilometers
 Δz = 100
+## What is this?
 Δc = 2Δy
 cᵢ(x, y, z) = exp(-y^2 / 2Δc^2) * exp(-(z + Lz/4)^2 / 2Δz^2)
 
