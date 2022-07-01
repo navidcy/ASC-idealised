@@ -1,10 +1,11 @@
 #!/bin/bash
-#PBS -q normal
+#PBS -q gpuvolta
 #PBS -P x77
-#PBS -l ncpus=48
-#PBS -l mem=190GB
+#PBS -l ncpus=12
+#PBS -l ngpus=1
+#PBS -l mem=128GB
 #PBS -l jobfs=100GB
-#PBS -l walltime=48:00:00
+#PBS -l walltime=24:00:00
 #PBS -l wd
 #PBS -N asc
 #PBS -W umask=027
