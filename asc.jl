@@ -29,18 +29,20 @@ width_shelf = 150kilometers
 
 shelf(x, y) = -(H + h)/2 - (H - h)/2 * tanh(y / width_shelf)
 
+# We can add a bump to break the homogeneity in zonal direction
 bump_amplitude = 50
 width_bump = 10kilometers
 
-# let's add a bump to break the homogeneity in zonal direction
 x_bump, y_bump = 0, 200kilometers
 bump(x, y) = bump_amplitude * exp(-((x - x_bump)^2 + (y - y_bump)^2) / 2width_bump^2)
 
-bathymetry(x, y) = shelf(x, y) + bump(x, y)
+# The bathymetry (with or without a bump)
+bathymetry(x, y) = shelf(x, y) #+ bump(x, y)
 
 grid = ImmersedBoundaryGrid(grid, GridFittedBottom(bathymetry))
 
 @info "Built a grid: $grid."
+
 
 # Physics
 Δx = grid.Lx / grid.Nx
@@ -65,9 +67,9 @@ parameters = (Ly = Ly,
               Lz = Lz,    
               Qᵇ = 10 / (ρ * cᵖ) * α * g,          # buoyancy flux magnitude [m² s⁻³]    
               y_shutoff = 5/6 * Ly,                # shutoff location for buoyancy flux [m]
-              y_salt_shutoff = - Ly/4,             # shutoff location for buoyancy flux [m]
+              y_salt_shutoff = - Ly/4,             # shutoff location for salt flux [m]
               Qsalt = 1.0,                         # ... some units for salt flux
-              τ = 0.2/ρ,                           # surface kinematic wind stress [m² s⁻²]
+              τ = 0.1 / ρ,                         # surface kinematic wind stress [m² s⁻²]
               μ = 1 / 30days,                      # bottom drag damping time-scale [s⁻¹]
               ΔB = 8 * α * g,                      # surface vertical buoyancy gradient [s⁻²]
               H = Lz,                              # domain depth [m]
@@ -82,6 +84,7 @@ parameters = (Ly = Ly,
     return p.τ * sin(π * y / p.Ly)
 end
 
+# Zonal wind stress
 u_stress_bc = FluxBoundaryCondition(u_stress, discrete_form=true, parameters=parameters)
 
 # Bottom drag
@@ -92,14 +95,15 @@ u_drag_bc = FluxBoundaryCondition(u_drag, discrete_form=true; parameters)
 v_drag_bc = FluxBoundaryCondition(v_drag, discrete_form=true; parameters)
 
 @inline u_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.u[i, j, k]    
-u_immersed_drag_bc = FluxBoundaryCondition(u_immersed_drag, discrete_form=true, parameters=parameters)
-
 @inline v_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.v[i, j, k]    
+
+u_immersed_drag_bc = FluxBoundaryCondition(u_immersed_drag, discrete_form=true, parameters=parameters)
 v_immersed_drag_bc = FluxBoundaryCondition(u_immersed_drag, discrete_form=true, parameters=parameters)
 
 u_bcs = FieldBoundaryConditions(top = u_stress_bc, bottom = u_drag_bc, immersed = u_immersed_drag_bc)
 v_bcs = FieldBoundaryConditions(bottom = v_drag_bc, immersed = v_immersed_drag_bc)
 
+#=
 @inline function buoyancy_flux(i, j, grid, clock, model_fields, p)
     y = ynode(Center(), j, grid)
     return ifelse(y < p.y_shutoff, p.Qᵇ * cos(3π * y / p.Ly), 0.0)
@@ -108,7 +112,7 @@ end
 buoyancy_flux_bc = FluxBoundaryCondition(buoyancy_flux, discrete_form=true, parameters=parameters)
 
 b_bcs = FieldBoundaryConditions(top = buoyancy_flux_bc)
-
+=#
 
 @inline function salf_flux(i, j, grid, clock, model_fields, p)
     y = ynode(Center(), j, grid)
@@ -119,10 +123,6 @@ salt_flux_bc = FluxBoundaryCondition(salf_flux, discrete_form=true, parameters=p
 
 S_bcs = FieldBoundaryConditions(top = salt_flux_bc)
 
-
-buoyancy = SeawaterBuoyancy(equation_of_state=LinearEquationOfState(thermal_expansion=2e-3, haline_contraction=5e-4))
-
-
 #####
 ##### Coriolis
 #####
@@ -131,13 +131,20 @@ const f₀ = -1e-4     # [s⁻¹]
 const β =  1e-11    # [m⁻¹ s⁻¹]
 coriolis = BetaPlane(; f₀, β)
 
+
+#####
+##### Buoyancy model
+#####
+
+buoyancy = SeawaterBuoyancy(equation_of_state=LinearEquationOfState(thermal_expansion=2e-3, haline_contraction=5e-4))
+
+
 #####
 ##### Model building
 #####
 
 @info "Building a model..."
 
-#free_surface = ImplicitFreeSurface()
 fft_preconditioner = FFTImplicitFreeSurfaceSolver(grid.underlying_grid)
 free_surface = ImplicitFreeSurface(solver_method=:PreconditionedConjugateGradient, preconditioner=fft_preconditioner)
 # free_surface = ImplicitFreeSurface(solver_method=:HeptadiagonalIterativeSolver)
@@ -163,9 +170,11 @@ model = HydrostaticFreeSurfaceModel(; grid,
 
 # resting initial condition
 ε(σ) = σ * randn()
+
 uᵢ(x, y, z) = ε(1e-8)
 vᵢ(x, y, z) = ε(1e-8)
 wᵢ(x, y, z) = ε(1e-8)
+
 Tᵢ(x, y, z) = ε(1e-8)
 Sᵢ(x, y, z) = ε(1e-8)
 
@@ -176,8 +185,10 @@ cᵢ(x, y, z) = exp(-y^2 / 2Δc^2) * exp(-(z + Lz/4)^2 / 2Δz^2)
 
 set!(model, S=Sᵢ, T=Tᵢ, u=uᵢ, v=vᵢ, w=wᵢ, c=cᵢ)
 
+
 #####
 ##### Simulation building
+#####
 
 simulation = Simulation(model, Δt=Δt₀, stop_time=stop_time)
 
