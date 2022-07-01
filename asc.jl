@@ -16,8 +16,8 @@ filename = "asc_channel"
 grid = RectilinearGrid(architecture,
                        topology = (Periodic, Bounded, Bounded), 
                        size = (128, 128, 16),
-                       x = (-500kilometers, 500kilometers),
-                       y = (-500kilometers, 500kilometers),
+                       x = (-250kilometers, 250kilometers),
+                       y = (-300kilometers, 300kilometers),
                        z = (-3kilometers, 0),
                        halo = (3, 3, 3))
 
@@ -29,18 +29,22 @@ width_shelf = 150kilometers
 
 shelf(x, y) = -(H + h)/2 - (H - h)/2 * tanh(y / width_shelf)
 
-bump_amplitude = 50
-width_bump = 10kilometers
 
-# let's add a bump to break the homogeneity in zonal direction
-x_bump, y_bump = 0, 200kilometers
-bump(x, y) = bump_amplitude * exp(-((x - x_bump)^2 + (y - y_bump)^2) / 2width_bump^2)
+#3 I have removed the bump as initialising with perturbations is a better setup for this.
+# bump_amplitude = 50
+# width_bump = 10kilometers
 
-bathymetry(x, y) = shelf(x, y) + bump(x, y)
+# # let's add a bump to break the homogeneity in zonal direction
+# x_bump, y_bump = 0, 200kilometers
+# bump(x, y) = bump_amplitude * exp(-((x - x_bump)^2 + (y - y_bump)^2) / 2width_bump^2)
+
+bathymetry(x, y) = shelf(x, y) #+ bump(x, y)
 
 grid = ImmersedBoundaryGrid(grid, GridFittedBottom(bathymetry))
 
 @info "Built a grid: $grid."
+
+## Check the biharmonic diffusivity used by Thompson and Stewart, 2014.
 
 # Physics
 Δx = grid.Lx / grid.Nx
@@ -63,10 +67,8 @@ cᵖ = 3994.0   # [J K⁻¹] heat capacity
 
 parameters = (Ly = Ly,  
               Lz = Lz,    
-              Qᵇ = 10 / (ρ * cᵖ) * α * g,          # buoyancy flux magnitude [m² s⁻³]    
-              y_shutoff = 5/6 * Ly,                # shutoff location for buoyancy flux [m]
-              y_salt_shutoff = - Ly/4,             # shutoff location for buoyancy flux [m]
-              Qsalt = 1.0,                         # ... some units for salt flux
+              y_salt_shutoff = - (Ly-50kilometers),# shutoff location for salt flux [km]
+              Qsalt = -2.5e-3,                     # salt input (into the domain) [gm^{-2}s^{-1}]
               τ = 0.2/ρ,                           # surface kinematic wind stress [m² s⁻²]
               μ = 1 / 30days,                      # bottom drag damping time-scale [s⁻¹]
               ΔB = 8 * α * g,                      # surface vertical buoyancy gradient [s⁻²]
@@ -127,7 +129,7 @@ buoyancy = SeawaterBuoyancy(equation_of_state=LinearEquationOfState(thermal_expa
 ##### Coriolis
 #####
 
-const f₀ = -1e-4     # [s⁻¹]
+const f₀ = -1.31e-4     # [s⁻¹]
 const β =  1e-11    # [m⁻¹ s⁻¹]
 coriolis = BetaPlane(; f₀, β)
 
