@@ -8,7 +8,7 @@ using Printf
 architecture = GPU()
 
 save_fields_interval = 7days
-stop_time = 0.2years
+stop_time = 2years
 Δt₀ = 5minutes
 
 filename = "asc_channel"
@@ -255,12 +255,14 @@ simulation.output_writers[:checkpointer] = Checkpointer(model,
                                                         prefix = filename,
                                                         overwrite_existing = true)
 
+velocities_filename = joinpath([@__DIR__, "ASC_outputs", filename * "_velocities" * ".nc"])
 simulation.output_writers[:velocities] = NetCDFOutputWriter(model, (; u, v, w);
-                                                            filename = "./ASC_output/" * filename * "_velocities",
+                                                            filename = velocities_filename,
                                                             schedule = TimeInterval(save_fields_interval))
 
+tracers_filename = joinpath([@__DIR__, "ASC_outputs", filename * "_tracers" * ".nc"])
 simulation.output_writers[:tracers] = NetCDFOutputWriter(model, (; T, S, c);
-                                                         filename = "./ASC_output/" * filename * "_tracers",
+                                                         filename = tracers_filename,
                                                          schedule = TimeInterval(save_fields_interval))
 #=
 slicers = (west = (1, :, :),
