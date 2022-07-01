@@ -255,12 +255,12 @@ simulation.output_writers[:checkpointer] = Checkpointer(model,
                                                         prefix = filename,
                                                         overwrite_existing = true)
 
-velocities_filename = joinpath([@__DIR__, "ASC_outputs", filename * "_velocities" * ".nc"])
+velocities_filename = joinpath(@__DIR__, "ASC_outputs", filename * "_velocities" * ".nc")
 simulation.output_writers[:velocities] = NetCDFOutputWriter(model, (; u, v, w);
                                                             filename = velocities_filename,
                                                             schedule = TimeInterval(save_fields_interval))
 
-tracers_filename = joinpath([@__DIR__, "ASC_outputs", filename * "_tracers" * ".nc"])
+tracers_filename = joinpath(@__DIR__, "ASC_outputs", filename * "_tracers" * ".nc")
 simulation.output_writers[:tracers] = NetCDFOutputWriter(model, (; T, S, c);
                                                          filename = tracers_filename,
                                                          schedule = TimeInterval(save_fields_interval))
