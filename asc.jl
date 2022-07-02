@@ -180,10 +180,9 @@ wᵢ(x, y, z) = ε(1e-8)
 Tᵢ(x, y, z) = ε(1e-8)
 Sᵢ(x, y, z) = ε(1e-8)
 
-Δy = 100kilometers
-Δz = 100
-## What is this?
-Δc = 2Δy
+# horizontal and vertical width of passive tracer initial distribution
+Δz = 100               # [m]
+Δc = 100kilometers     # [m]
 cᵢ(x, y, z) = exp(-y^2 / 2Δc^2) * exp(-(z + Lz/4)^2 / 2Δz^2)
 
 set!(model, S=Sᵢ, T=Tᵢ, u=uᵢ, v=vᵢ, w=wᵢ, c=cᵢ)
