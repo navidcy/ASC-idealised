@@ -89,7 +89,7 @@ parameters = (Ly = Ly,
 
 @inline function u_stress(i, j, grid, clock, model_fields, p)
     y = ynode(Center(), j, grid)
-    return ifelse(y > p.y_salt_shutoff, p.τ * sin(π * (y - p.y_salt_shutoff)/ (p.Ly-p.polynya_width)), 0.0)
+    return ifelse(y > p.y_salt_shutoff, p.τ * sin(π * (y - p.y_salt_shutoff) / (p.Ly - p.polynya_width)), 0.0)
 end
 
 # Zonal wind stress
@@ -109,18 +109,6 @@ v_immersed_drag_bc = FluxBoundaryCondition(u_immersed_drag, discrete_form=true, 
 
 u_bcs = FieldBoundaryConditions(top = u_stress_bc, bottom = u_drag_bc, immersed = u_immersed_drag_bc)
 v_bcs = FieldBoundaryConditions(bottom = v_drag_bc, immersed = v_immersed_drag_bc)
-
-#=
-## We don't need a buoyancy flux here ##
-@inline function buoyancy_flux(i, j, grid, clock, model_fields, p)
-    y = ynode(Center(), j, grid)
-    return ifelse(y < p.y_shutoff, p.Qᵇ * cos(3π * y / p.Ly), 0.0)
-end
-
-buoyancy_flux_bc = FluxBoundaryCondition(buoyancy_flux, discrete_form=true, parameters=parameters)
-
-b_bcs = FieldBoundaryConditions(top = buoyancy_flux_bc)
-=#
 
 @inline function salf_flux(i, j, grid, clock, model_fields, p)
     y = ynode(Center(), j, grid)
