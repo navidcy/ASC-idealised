@@ -5,7 +5,7 @@ using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: FFTImplicitFreeSurfaceSolver
 using Printf
 
-architecture = GPU()
+architecture = CPU()
 
 save_fields_interval = 7days
 stop_time = 2years
@@ -13,17 +13,17 @@ stop_time = 2years
 
 filename = "asc_channel"
 
+Lx, Ly, Lz = 500kilometers, 600kilometers, 3kilometers
+
 grid = RectilinearGrid(architecture,
                        topology = (Periodic, Bounded, Bounded), 
                        size = (128, 128, 16),
-                       x = (-250kilometers, 250kilometers),
-                       y = (-300kilometers, 300kilometers),
-                       z = (-3kilometers, 0),
+                       x = (-Lx/2, Lx/2),
+                       y = (-Ly/2, Ly/2),
+                       z = (-Lz, 0),
                        halo = (3, 3, 3))
 
-Lx, Ly = grid.Lx, grid.Ly
-
-H_deep = H = Lz = grid.Lz
+H_deep = H = grid.Lz
 H_shelf = h = 500meters
 width_shelf = 150kilometers
 
@@ -68,28 +68,28 @@ g  = 9.8061   # [m s⁻²] gravitational constant
 cᵖ = 3994.0   # [J K⁻¹] heat capacity
 ρ  = 1024.0   # [kg m⁻³] reference density
 
-parameters = (Ly = Ly,  
-              Lz = Lz,    
-              y_salt_shutoff = - (Ly-50kilometers),# shutoff location for salt flux [km]
-              Qsalt = 2.5e-3,                      # salt input (into the domain) [gm^{-2}s^{-1}]
-              τ = 0.075/ρ,                         # surface kinematic wind stress [m² s⁻²]
-              Qᵇ = 10 / (ρ * cᵖ) * α * g,          # buoyancy flux magnitude [m² s⁻³]    
-              y_shutoff = 5/6 * Ly,                # shutoff location for buoyancy flux [m]
-              ## TS14 use a linear drag coefficient of 1e-3 ms^{-1}, how does that compare to this? 
-	      μ = 1 / 30days,                      # bottom drag damping time-scale [s⁻¹]
-              ΔB = 8 * α * g,                      # surface vertical buoyancy gradient [s⁻²]
-              H = Lz,                              # domain depth [m]
-              h = 1000.0,                          # exponential decay scale of stable stratification [m]
-              y_sponge = -200 kilometers,          # southern boundary of sponge layer [km]
-              λt = 56.0days                        # relaxation time scale for T,S  [s]
-	      ## Can we have an additional relaxation timescale here for velocity damping? ##
-	      \lambdau = 26.0days                   # relaxation time scale for u,v and w 
+polynya_width = 50kilometers
+
+parameters = (Ly = Ly,
+              Lz = Lz,
+              polynya_width = polynya_width,
+              y_salt_shutoff = - (Ly/2 - polynya_width),  # shutoff location for salt flux [km]
+              Qsalt = 2.5e-3,                             # salt input (into the domain) [gm⁻² s⁻¹]
+              τ = 0.075 / ρ,                              # surface kinematic wind stress [m² s⁻²]
+              Qᵇ = 10 / (ρ * cᵖ) * α * g,                 # buoyancy flux magnitude [m² s⁻³]    
+              y_shutoff = 5/6 * Ly,                       # shutoff location for buoyancy flux [m]
+	          μ = 1 / 30days,                             # bottom drag damping time-scale [s⁻¹]
+              ΔB = 8 * α * g,                             # surface vertical buoyancy gradient [s⁻²]
+              H = Lz,                                     # domain depth [m]
+              h = 1000.0,                                 # exponential decay scale of stable stratification [m]
+              y_sponge = - 200kilometers,                 # southern boundary of sponge layer [km]
+              λt = 56.0days,                              # relaxation time scale for T, S  [s]
+              λu = 26.0days,                              # relaxation time scale for u, v, and w [s]
 	      )
 
 @inline function u_stress(i, j, grid, clock, model_fields, p)
     y = ynode(Center(), j, grid)
-    ## TO DO: Modify tau profile to match TS14
-    return ifelse(y>p.y_salt_shutoff, p.τ * sin(π * y / p.Ly), 0.0)
+    return ifelse(y > p.y_salt_shutoff, p.τ * sin(π * (y - p.y_salt_shutoff)/ (p.Ly-p.polynya_width)), 0.0)
 end
 
 # Zonal wind stress
