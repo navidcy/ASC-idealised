@@ -79,7 +79,8 @@ parameters = (Ly = Ly,
               Qᵇ = 10 / (ρ * cᵖ) * α * g,                 # buoyancy flux magnitude [m² s⁻³]    
               y_shutoff = 5/6 * Ly,                       # shutoff location for buoyancy flux [m]
 	          μ = 1 / 30days,                             # bottom drag damping time-scale [s⁻¹]
-              ΔT = 5,                                     # surface vertical buoyancy gradient [K]
+              ΔT = 5,                                     # surface temperature gradient [K]
+              ΔS = 0.5,                                   # surface salinity gradient [K]
               H = Lz,                                     # domain depth [m]
               h = 1000.0,                                 # exponential decay scale of stable stratification [m]
               y_sponge = - 200kilometers,                 # southern boundary of sponge layer [km]
@@ -132,6 +133,8 @@ S_bcs = FieldBoundaryConditions(top = salt_flux_bc)
     return -1 / timescale * mask(y, p) * (T - target_T)
 end
 
+
+@inline initial_salinity(y, z, p) = p.ΔS * (exp(z / p.h) - 1) + p.ΔS * y / p.Ly
 
 
 #####
@@ -200,8 +203,8 @@ uᵢ(x, y, z) = ε(1e-8)
 vᵢ(x, y, z) = ε(1e-8)
 wᵢ(x, y, z) = ε(1e-8)
 
-Tᵢ(x, y, z) = ε(1e-8)
-Sᵢ(x, y, z) = ε(1e-8)
+Tᵢ(x, y, z) = initial_temperature(y, z, parameters) + ε(1e-8)
+Sᵢ(x, y, z) = initial_salinity(y, z, parameters) + ε(1e-8)
 
 # horizontal and vertical width of passive tracer initial distribution
 Δz = 100               # [m]
