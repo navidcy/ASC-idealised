@@ -79,11 +79,11 @@ parameters = (Ly = Ly,
               Qᵇ = 10 / (ρ * cᵖ) * α * g,                 # buoyancy flux magnitude [m² s⁻³]    
               y_shutoff = 5/6 * Ly,                       # shutoff location for buoyancy flux [m]
 	          μ = 1 / 30days,                             # bottom drag damping time-scale [s⁻¹]
-              ΔB = 8 * α * g,                             # surface vertical buoyancy gradient [s⁻²]
+              ΔT = 5,                                     # surface vertical buoyancy gradient [K]
               H = Lz,                                     # domain depth [m]
               h = 1000.0,                                 # exponential decay scale of stable stratification [m]
               y_sponge = - 200kilometers,                 # southern boundary of sponge layer [km]
-              λt = 56.0days,                              # relaxation time scale for T, S  [s]
+              λT = 56.0days,                              # relaxation time scale for T, S  [s]
               λu = 26.0days,                              # relaxation time scale for u, v, and w [s]
 	      )
 
@@ -119,6 +119,21 @@ salt_flux_bc = FluxBoundaryCondition(salf_flux, discrete_form=true, parameters=p
 
 S_bcs = FieldBoundaryConditions(top = salt_flux_bc)
 
+@inline initial_temperature(y, z, p) = p.ΔT * (exp(z / p.h) - 1) + p.ΔT * y / p.Ly
+
+@inline mask(y, p) = max(0.0, y - p.y_sponge) / (p.Ly - p.y_sponge)
+
+@inline function temperature_relaxation(i, j, k, grid, clock, model_fields, p)
+    timescale = p.λT
+    y = ynode(Center(), j, grid)
+    z = znode(Center(), k, grid)
+    target_T = initial_temperature(y, z, p)
+    T = @inbounds model_fields.T[i, j, k]
+    return -1 / timescale * mask(y, p) * (T - target_T)
+end
+
+
+
 #####
 ##### Coriolis
 #####
@@ -126,6 +141,13 @@ S_bcs = FieldBoundaryConditions(top = salt_flux_bc)
 const f₀ = -1.31e-4     # [s⁻¹]
 const β =  1e-11    # [m⁻¹ s⁻¹]
 coriolis = BetaPlane(; f₀, β)
+
+
+#####
+##### Forcing and initial condition
+#####
+
+temperature_forcing = Forcing(temperature_relaxation, discrete_form = true, parameters = parameters)
 
 
 #####
@@ -160,6 +182,7 @@ model = HydrostaticFreeSurfaceModel(; grid,
                                     momentum_advection = WENO5(),
                                     tracer_advection = WENO5(),
                                     boundary_conditions = (S=S_bcs, u=u_bcs, v=v_bcs),
+                                    forcing = (; T = temperature_forcing))
                                     )
 
 @info "Built $model."
