@@ -5,7 +5,7 @@ using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: FFTImplicitFreeSurfaceSolver
 using Printf
 
-architecture = CPU()
+architecture = GPU()
 
 save_fields_interval = 7days
 stop_time = 2years
@@ -69,7 +69,7 @@ cᵖ = 3994.0   # [J K⁻¹] heat capacity
 ρ  = 1024.0   # [kg m⁻³] reference density
 
 polynya_width = 50kilometers
-
+sponge_width = 100kilometers
 parameters = (Ly = Ly,
               Lz = Lz,
               polynya_width = polynya_width,
@@ -79,11 +79,12 @@ parameters = (Ly = Ly,
               Qᵇ = 10 / (ρ * cᵖ) * α * g,                 # buoyancy flux magnitude [m² s⁻³]    
               y_shutoff = 5/6 * Ly,                       # shutoff location for buoyancy flux [m]
 	          μ = 1 / 30days,                             # bottom drag damping time-scale [s⁻¹]
-              ΔB = 8 * α * g,                             # surface vertical buoyancy gradient [s⁻²]
+              ΔT = 5,                                     # surface temperature gradient [K]
+              ΔS = 0.5,                                   # surface salinity gradient [K]
               H = Lz,                                     # domain depth [m]
               h = 1000.0,                                 # exponential decay scale of stable stratification [m]
-              y_sponge = - 200kilometers,                 # southern boundary of sponge layer [km]
-              λt = 56.0days,                              # relaxation time scale for T, S  [s]
+              y_sponge =  Ly/2-sponge_width,              # northern boundary of sponge layer [km]
+              λT = 56.0days,                              # relaxation time scale for T, S  [s]
               λu = 26.0days,                              # relaxation time scale for u, v, and w [s]
 	      )
 
@@ -103,7 +104,8 @@ u_stress_bc = FluxBoundaryCondition(u_stress, discrete_form=true, parameters=par
 u_drag_bc = FluxBoundaryCondition(u_drag, discrete_form=true; parameters)
 v_drag_bc = FluxBoundaryCondition(v_drag, discrete_form=true; parameters)
 
-@inline u_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.u[i, j, k] @inline v_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.v[i, j, k]    
+@inline u_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.u[i, j, k] 
+@inline v_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.v[i, j, k]    
 u_immersed_drag_bc = FluxBoundaryCondition(u_immersed_drag, discrete_form=true, parameters=parameters)
 v_immersed_drag_bc = FluxBoundaryCondition(u_immersed_drag, discrete_form=true, parameters=parameters)
 
@@ -119,6 +121,47 @@ salt_flux_bc = FluxBoundaryCondition(salf_flux, discrete_form=true, parameters=p
 
 S_bcs = FieldBoundaryConditions(top = salt_flux_bc)
 
+@inline initial_temperature(y, z, p) = p.ΔT * (exp(z / p.h) - 1) + p.ΔT * y / p.Ly
+@inline initial_salinity(y, z, p) = p.ΔS * (exp(z / p.h) - 1) + p.ΔS * y / p.Ly
+
+@inline mask(y, p) = max(0.0, y - p.y_sponge) / (p.Ly/2 - p.y_sponge)
+
+@inline function temperature_relaxation(i, j, k, grid, clock, model_fields, p)
+    timescale = p.λT
+    y = ynode(Center(), j, grid)
+    z = znode(Center(), k, grid)
+    target_T = initial_temperature(y, z, p)
+    T = @inbounds model_fields.T[i, j, k]
+    return -1 / timescale * mask(y, p) * (T - target_T)
+end
+
+@inline function salinity_relaxation(i, j, k, grid, clock, model_fields, p)
+    timescale = p.λT
+    y = ynode(Center(), j, grid)
+    z = znode(Center(), k, grid)
+    target_S = initial_salinity(y, z, p)
+    S = @inbounds model_fields.S[i, j, k]
+    return -1 / timescale * mask(y, p) * (S - target_S)
+end
+
+
+@inline function u_relaxation(i, j, k, grid, clock, model_fields, p)
+    timescale = p.λu
+    y = ynode(Center(), j, grid)
+    z = znode(Center(), k, grid)
+    u = @inbounds model_fields.u[i, j, k]
+    return - 1 / timescale * mask(y, p) * u
+end
+
+@inline function v_relaxation(i, j, k, grid, clock, model_fields, p)
+    timescale = p.λu
+    y = ynode(Face(), j, grid)
+    z = znode(Center(), k, grid)
+    v = @inbounds model_fields.v[i, j, k]
+    return - 1 / timescale * mask(y, p) * v
+end
+
+
 #####
 ##### Coriolis
 #####
@@ -127,6 +170,15 @@ const f₀ = -1.31e-4     # [s⁻¹]
 const β =  1e-11    # [m⁻¹ s⁻¹]
 coriolis = BetaPlane(; f₀, β)
 
+
+#####
+##### Forcing and initial condition
+#####
+
+temperature_forcing = Forcing(temperature_relaxation, discrete_form = true, parameters = parameters)
+salt_forcing = Forcing(salinity_relaxation, discrete_form = true, parameters = parameters)
+u_forcing = Forcing(u_relaxation, discrete_form = true, parameters = parameters)
+v_forcing = Forcing(v_relaxation, discrete_form = true, parameters = parameters)
 
 #####
 ##### Buoyancy model
@@ -154,17 +206,16 @@ model = HydrostaticFreeSurfaceModel(; grid,
                                     buoyancy,
                                     closure = (vertical_diffusivities,
                                                horizontal_viscosity,
-                                               horizontal_biharmonic,
+                                               # horizontal_biharmonic,
                                                convective_adjustment),
                                     tracers = (:T, :S, :c),
                                     momentum_advection = WENO5(),
                                     tracer_advection = WENO5(),
                                     boundary_conditions = (S=S_bcs, u=u_bcs, v=v_bcs),
+                                    forcing = (; T = temperature_forcing, S = salt_forcing, v = v_forcing, u = u_forcing)
                                     )
 
 @info "Built $model."
-
-
 
 #####
 ##### Initial conditions
@@ -177,8 +228,8 @@ uᵢ(x, y, z) = ε(1e-8)
 vᵢ(x, y, z) = ε(1e-8)
 wᵢ(x, y, z) = ε(1e-8)
 
-Tᵢ(x, y, z) = ε(1e-8)
-Sᵢ(x, y, z) = ε(1e-8)
+Tᵢ(x, y, z) = initial_temperature(y, z, parameters) + ε(1e-8)
+Sᵢ(x, y, z) = initial_salinity(y, z, parameters) + ε(1e-8)
 
 # horizontal and vertical width of passive tracer initial distribution
 Δz = 100               # [m]
