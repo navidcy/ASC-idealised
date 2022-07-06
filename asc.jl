@@ -69,7 +69,7 @@ cᵖ = 3994.0   # [J K⁻¹] heat capacity
 ρ  = 1024.0   # [kg m⁻³] reference density
 
 polynya_width = 50kilometers
-
+sponge_width = 100kilometers
 parameters = (Ly = Ly,
               Lz = Lz,
               polynya_width = polynya_width,
@@ -83,7 +83,7 @@ parameters = (Ly = Ly,
               ΔS = 0.5,                                   # surface salinity gradient [K]
               H = Lz,                                     # domain depth [m]
               h = 1000.0,                                 # exponential decay scale of stable stratification [m]
-              y_sponge = - 200kilometers,                 # southern boundary of sponge layer [km]
+              y_sponge =  Ly/2-sponge_width,              # northern boundary of sponge layer [km]
               λT = 56.0days,                              # relaxation time scale for T, S  [s]
               λu = 26.0days,                              # relaxation time scale for u, v, and w [s]
 	      )
@@ -121,8 +121,9 @@ salt_flux_bc = FluxBoundaryCondition(salf_flux, discrete_form=true, parameters=p
 S_bcs = FieldBoundaryConditions(top = salt_flux_bc)
 
 @inline initial_temperature(y, z, p) = p.ΔT * (exp(z / p.h) - 1) + p.ΔT * y / p.Ly
+@inline initial_salinity(y, z, p) = p.ΔS * (exp(z / p.h) - 1) + p.ΔS * y / p.Ly
 
-@inline mask(y, p) = max(0.0, y - p.y_sponge) / (p.Ly - p.y_sponge)
+@inline mask(y, p) = max(0.0, y - p.y_sponge) / (p.Ly/2 - p.y_sponge)
 
 @inline function temperature_relaxation(i, j, k, grid, clock, model_fields, p)
     timescale = p.λT
@@ -133,8 +134,31 @@ S_bcs = FieldBoundaryConditions(top = salt_flux_bc)
     return -1 / timescale * mask(y, p) * (T - target_T)
 end
 
+@inline function salt_relaxation(i, j, k, grid, clock, model_fields, p)
+    timescale = p.λT
+    y = ynode(Center(), j, grid)
+    z = znode(Center(), k, grid)
+    target_S = initial_salinity(y, z, p)
+    S = @inbounds model_fields.S[i, j, k]
+    return -1 / timescale * mask(y, p) * (S - target_S)
+end
 
-@inline initial_salinity(y, z, p) = p.ΔS * (exp(z / p.h) - 1) + p.ΔS * y / p.Ly
+
+@inline function u_relaxation(i, j, k, grid, clock, model_fields, p)
+    timescale = p.λu
+    y = ynode(Center(), j, grid)
+    z = znode(Center(), k, grid)
+    u = @inbounds model_fields.u[i, j, k]
+    return - 1 / timescale * mask(y, p) * u
+end
+
+@inline function v_relaxation(i, j, k, grid, clock, model_fields, p)
+    timescale = p.λu
+    y = ynode(Face(), j, grid)
+    z = znode(Center(), k, grid)
+    v = @inbounds model_fields.v[i, j, k]
+    return - 1 / timescale * mask(y, p) * v
+end
 
 
 #####
@@ -151,7 +175,9 @@ coriolis = BetaPlane(; f₀, β)
 #####
 
 temperature_forcing = Forcing(temperature_relaxation, discrete_form = true, parameters = parameters)
-
+salt_forcing = Forcing(salinity_relaxation, discrete_form = true, parameters = parameters)
+u_forcing = Forcing(u_relaxation, discrete_form = true, parameters = parameters)
+v_forcing = Forcing(v_relaxation, discrete_form = true, parameters = parameters)
 
 #####
 ##### Buoyancy model
@@ -185,12 +211,10 @@ model = HydrostaticFreeSurfaceModel(; grid,
                                     momentum_advection = WENO5(),
                                     tracer_advection = WENO5(),
                                     boundary_conditions = (S=S_bcs, u=u_bcs, v=v_bcs),
-                                    forcing = (; T = temperature_forcing))
+                                    forcing = (; T = temperature_forcing, S = salinity_forcing, v = v_forcing, u = u_forcing)
                                     )
 
 @info "Built $model."
-
-
 
 #####
 ##### Initial conditions
