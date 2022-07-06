@@ -104,7 +104,8 @@ u_stress_bc = FluxBoundaryCondition(u_stress, discrete_form=true, parameters=par
 u_drag_bc = FluxBoundaryCondition(u_drag, discrete_form=true; parameters)
 v_drag_bc = FluxBoundaryCondition(v_drag, discrete_form=true; parameters)
 
-@inline u_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.u[i, j, k] @inline v_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.v[i, j, k]    
+@inline u_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.u[i, j, k] 
+@inline v_immersed_drag(i, j, k, grid, clock, model_fields, p) = @inbounds - p.μ * p.Lz * model_fields.v[i, j, k]    
 u_immersed_drag_bc = FluxBoundaryCondition(u_immersed_drag, discrete_form=true, parameters=parameters)
 v_immersed_drag_bc = FluxBoundaryCondition(u_immersed_drag, discrete_form=true, parameters=parameters)
 
@@ -134,7 +135,7 @@ S_bcs = FieldBoundaryConditions(top = salt_flux_bc)
     return -1 / timescale * mask(y, p) * (T - target_T)
 end
 
-@inline function salt_relaxation(i, j, k, grid, clock, model_fields, p)
+@inline function salinity_relaxation(i, j, k, grid, clock, model_fields, p)
     timescale = p.λT
     y = ynode(Center(), j, grid)
     z = znode(Center(), k, grid)
@@ -205,13 +206,13 @@ model = HydrostaticFreeSurfaceModel(; grid,
                                     buoyancy,
                                     closure = (vertical_diffusivities,
                                                horizontal_viscosity,
-                                               horizontal_biharmonic,
+                                               # horizontal_biharmonic,
                                                convective_adjustment),
                                     tracers = (:T, :S, :c),
                                     momentum_advection = WENO5(),
                                     tracer_advection = WENO5(),
                                     boundary_conditions = (S=S_bcs, u=u_bcs, v=v_bcs),
-                                    forcing = (; T = temperature_forcing, S = salinity_forcing, v = v_forcing, u = u_forcing)
+                                    forcing = (; T = temperature_forcing, S = salt_forcing, v = v_forcing, u = u_forcing)
                                     )
 
 @info "Built $model."
