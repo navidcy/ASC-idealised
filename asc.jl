@@ -15,12 +15,18 @@ filename = "asc_channel"
 
 Lx, Ly, Lz = 500kilometers, 600kilometers, 3kilometers
 
+Nx, Ny, Nz = 128, 128, 64
+
+decay = Nz/Lz*2
+
+stretched_grid(k) = -(Lz*(tanh(decay*(k-Nz-0.5))))+(Lz*tanh(decay*(-Nz+1-0.5)));
+
 grid = RectilinearGrid(architecture,
                        topology = (Periodic, Bounded, Bounded), 
-                       size = (128, 128, 16),
+                       size = (Nx, Ny, Nz),
                        x = (-Lx/2, Lx/2),
                        y = (-Ly/2, Ly/2),
-                       z = (-Lz, 0),
+                       z = stretched_grid,
                        halo = (3, 3, 3))
 
 H_deep = H = grid.Lz
