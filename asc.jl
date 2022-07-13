@@ -19,7 +19,10 @@ Nx, Ny, Nz = 128, 128, 64
 
 decay = Nz/Lz*2
 
-stretched_grid(k) = -(Lz*(tanh(decay*(k-Nz-0.5))))+(Lz*tanh(decay*(-Nz+1-0.5)));
+
+stretched_grid(k) = -(-(Lz*(tanh(decay*(k+Nz+0.5)))-(Lz*tanh(decay*(2*Nz+1.5))))/(-(Lz*(tanh(decay*(Nz+1.5)))-(Lz*tanh(decay*(2*Nz+1.5)))))*Lz)
+
+
 
 grid = RectilinearGrid(architecture,
                        topology = (Periodic, Bounded, Bounded), 
