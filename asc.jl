@@ -19,7 +19,11 @@ Nx, Ny, Nz = 128, 128, 64
 
 decay = Nz/Lz*2
 
-stretched_grid(k) = -(Lz*(tanh(decay*(k-Nz-0.5))))+(Lz*tanh(decay*(-Nz+1-0.5)));
+
+z_faces(k) = Lz * (tanh(decay * (2Nz + 3/2)) - tanh(decay * (Nz + 1/2 + k))) / 
+                            (tanh(decay * (Nz + 3/2)) - tanh(decay * (2Nz + 3/2)))
+
+
 
 grid = RectilinearGrid(architecture,
                        topology = (Periodic, Bounded, Bounded), 
@@ -28,6 +32,13 @@ grid = RectilinearGrid(architecture,
                        y = (-Ly/2, Ly/2),
                        z = stretched_grid,
                        halo = (3, 3, 3))
+
+## Plot the z-grid (for testing purposes)
+#fig = Figure()
+#ax = Axis(fig[1, 1], ylabel = "Depth (m)", xlabel = "Vertical spacing (m)")
+#lines!(ax, grid.Δzᵃᵃᶜ[1:grid.Nz], grid.zᵃᵃᶜ[1:grid.Nz])
+#scatter!(ax, grid.Δzᵃᵃᶜ[1:Nz], grid.zᵃᵃᶜ[1:Nz])
+#current_figure()
 
 H_deep = H = grid.Lz
 H_shelf = h = 500meters
