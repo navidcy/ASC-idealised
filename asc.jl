@@ -15,7 +15,7 @@ filename = "asc_channel"
 
 Lx, Ly, Lz = 500kilometers, 600kilometers, 3kilometers
 
-Nx, Ny, Nz = 128, 128, 64
+Nx, Ny, Nz = 64, 64, 24
 
 decay = Nz/Lz*2
 
@@ -30,7 +30,7 @@ grid = RectilinearGrid(architecture,
                        size = (Nx, Ny, Nz),
                        x = (-Lx/2, Lx/2),
                        y = (-Ly/2, Ly/2),
-                       z = stretched_grid,
+                       z = z_faces,
                        halo = (3, 3, 3))
 
 ## Plot the z-grid (for testing purposes)
@@ -226,10 +226,15 @@ model = HydrostaticFreeSurfaceModel(; grid,
                                                # horizontal_biharmonic,
                                                convective_adjustment),
                                     tracers = (:T, :S, :c),
-                                    momentum_advection = WENO5(),
-                                    tracer_advection = WENO5(),
-                                    boundary_conditions = (S=S_bcs, u=u_bcs, v=v_bcs),
-                                    forcing = (; T = temperature_forcing, S = salt_forcing, v = v_forcing, u = u_forcing)
+                                    momentum_advection = WENO5(; grid),
+                                    tracer_advection = WENO5(; grid),
+                                    boundary_conditions = (S = S_bcs,
+                                                           u = u_bcs,
+                                                           v = v_bcs),
+                                    forcing = (; T = temperature_forcing,
+                                                 S = salt_forcing,
+                                                 u = u_forcing,
+                                                 v = v_forcing)
                                     )
 
 @info "Built $model."
