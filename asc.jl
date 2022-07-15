@@ -17,13 +17,11 @@ Lx, Ly, Lz = 500kilometers, 600kilometers, 3kilometers
 
 Nx, Ny, Nz = 64, 64, 24
 
-decay = Nz/Lz*2
+decay = Nz / Lz * 2
 
-
-z_faces(k) = Lz * (tanh(decay * (2Nz + 3/2)) - tanh(decay * (Nz + 1/2 + k))) / 
-                            (tanh(decay * (Nz + 3/2)) - tanh(decay * (2Nz + 3/2)))
-
-
+# location of z faces; z_faces(1) = - Lz, z_faces(Nz + 1) = 0
+z_faces(k) = - Lz * (tanh(decay * (k + Nz + 1/2)) - tanh(decay * (2Nz + 3/2))) / 
+                    (tanh(decay * (Nz + 3/2)) - tanh(decay * (2Nz + 3/2)))
 
 grid = RectilinearGrid(architecture,
                        topology = (Periodic, Bounded, Bounded), 
@@ -34,27 +32,32 @@ grid = RectilinearGrid(architecture,
                        halo = (3, 3, 3))
 
 ## Plot the z-grid (for testing purposes)
-#fig = Figure()
-#ax = Axis(fig[1, 1], ylabel = "Depth (m)", xlabel = "Vertical spacing (m)")
-#lines!(ax, grid.Δzᵃᵃᶜ[1:grid.Nz], grid.zᵃᵃᶜ[1:grid.Nz])
-#scatter!(ax, grid.Δzᵃᵃᶜ[1:Nz], grid.zᵃᵃᶜ[1:Nz])
-#current_figure()
+#=
+fig = Figure()
+ax = Axis(fig[1, 1], ylabel = "Depth (m)", xlabel = "Vertical spacing (m)")
+lines!(ax, grid.Δzᵃᵃᶜ[1:grid.Nz], grid.zᵃᵃᶜ[1:grid.Nz])
+scatter!(ax, grid.Δzᵃᵃᶜ[1:Nz], grid.zᵃᵃᶜ[1:Nz])
+current_figure()
+=#
 
+## Construct shelf immersed boundary
 H_deep = H = grid.Lz
 H_shelf = h = 500meters
 width_shelf = 150kilometers
 
 shelf(x, y) = -(H + h)/2 - (H - h)/2 * tanh(y / width_shelf)
 
-# We can add a bump to break the homogeneity in zonal direction
+
+bathymetry(x, y) = shelf(x, y)
+
+#=
+# We can add a small bump to bathymetry(x, y) to break the homogeneity in zonal direction
 bump_amplitude = 50
 width_bump = 10kilometers
 
 x_bump, y_bump = 0, 200kilometers
 bump(x, y) = bump_amplitude * exp(-((x - x_bump)^2 + (y - y_bump)^2) / 2width_bump^2)
-
-# We don't add a bump here because we add noise as an initial condition
-bathymetry(x, y) = shelf(x, y)
+=#
 
 grid = ImmersedBoundaryGrid(grid, GridFittedBottom(bathymetry))
 
@@ -76,6 +79,7 @@ horizontal_viscosity = HorizontalScalarDiffusivity(; ν)
 horizontal_biharmonic = HorizontalScalarBiharmonicDiffusivity(ν=κ₄h, κ=κ₄h)
 convective_adjustment = ConvectiveAdjustmentVerticalDiffusivity(convective_κz = 1.0,
                                                                 convective_νz = 0.0)
+
 #####
 ##### Boundary conditions
 #####
@@ -83,26 +87,25 @@ convective_adjustment = ConvectiveAdjustmentVerticalDiffusivity(convective_κz =
 α  = 2e-4     # [K⁻¹] thermal expansion coefficient 
 g  = 9.8061   # [m s⁻²] gravitational constant
 cᵖ = 3994.0   # [J K⁻¹] heat capacity
-ρ  = 1024.0   # [kg m⁻³] reference density
+ρ₀ = 1024.0   # [kg m⁻³] reference density
 
 polynya_width = 50kilometers
 sponge_width = 100kilometers
+
 parameters = (Ly = Ly,
               Lz = Lz,
               polynya_width = polynya_width,
               y_salt_shutoff = - (Ly/2 - polynya_width),  # shutoff location for salt flux [km]
               Qsalt = 2.5e-3,                             # salt input (into the domain) [gm⁻² s⁻¹]
-              τ = 0.075 / ρ,                              # surface kinematic wind stress [m² s⁻²]
-              Qᵇ = 10 / (ρ * cᵖ) * α * g,                 # buoyancy flux magnitude [m² s⁻³]    
-              y_shutoff = 5/6 * Ly,                       # shutoff location for buoyancy flux [m]
+              τ = 0.075 / ρ₀,                             # surface kinematic wind stress [m² s⁻²]
 	          μ = 1 / 30days,                             # bottom drag damping time-scale [s⁻¹]
               ΔT = 5,                                     # surface temperature gradient [K]
               ΔS = 0.5,                                   # surface salinity gradient [K]
               H = Lz,                                     # domain depth [m]
               h = 1000.0,                                 # exponential decay scale of stable stratification [m]
-              y_sponge =  Ly/2-sponge_width,              # northern boundary of sponge layer [km]
-              λT = 56.0days,                              # relaxation time scale for T, S  [s]
-              λu = 26.0days,                              # relaxation time scale for u, v, and w [s]
+              y_sponge = Ly/2 - sponge_width,             # northern boundary of sponge layer [km]
+              λT = 56days,                                # relaxation time scale for T, S  [s]
+              λu = 26days,                                # relaxation time scale for u, v, and w [s]
 	      )
 
 @inline function u_stress(i, j, grid, clock, model_fields, p)
@@ -149,6 +152,7 @@ S_bcs = FieldBoundaryConditions(top = salt_flux_bc)
     z = znode(Center(), k, grid)
     target_T = initial_temperature(y, z, p)
     T = @inbounds model_fields.T[i, j, k]
+
     return -1 / timescale * mask(y, p) * (T - target_T)
 end
 
@@ -158,23 +162,24 @@ end
     z = znode(Center(), k, grid)
     target_S = initial_salinity(y, z, p)
     S = @inbounds model_fields.S[i, j, k]
-    return -1 / timescale * mask(y, p) * (S - target_S)
+
+    return - 1 / timescale * mask(y, p) * (S - target_S)
 end
 
 
 @inline function u_relaxation(i, j, k, grid, clock, model_fields, p)
     timescale = p.λu
     y = ynode(Center(), j, grid)
-    z = znode(Center(), k, grid)
     u = @inbounds model_fields.u[i, j, k]
+    
     return - 1 / timescale * mask(y, p) * u
 end
 
 @inline function v_relaxation(i, j, k, grid, clock, model_fields, p)
     timescale = p.λu
     y = ynode(Face(), j, grid)
-    z = znode(Center(), k, grid)
     v = @inbounds model_fields.v[i, j, k]
+
     return - 1 / timescale * mask(y, p) * v
 end
 
@@ -183,8 +188,8 @@ end
 ##### Coriolis
 #####
 
-const f₀ = -1.31e-4     # [s⁻¹]
-const β =  1e-11    # [m⁻¹ s⁻¹]
+const f₀ = -1.31e-4  # [s⁻¹]
+const β  =  1e-11    # [m⁻¹ s⁻¹]
 coriolis = BetaPlane(; f₀, β)
 
 
