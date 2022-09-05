@@ -7,15 +7,17 @@ using Printf
 
 architecture = GPU()
 
-save_fields_interval = 7days
-stop_time = 30days
+save_fields_interval = 1hour
+stop_time = 1day
 Δt₀ = 5minutes
 
 filename = "asc_channel"
 
 Lx, Ly, Lz = 500kilometers, 600kilometers, 3kilometers
 
-Nx, Ny, Nz = 64, 64, 24
+## Leave Nz = 64 ##
+
+Nx, Ny, Nz = 64, 64, 64 
 
 decay = Nz / Lz * 2
 
