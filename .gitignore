@@ -32,3 +32,4 @@ docs/site/
 *.svg
 *.png
 *.log
+*.sh
