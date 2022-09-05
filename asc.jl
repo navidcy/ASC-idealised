@@ -5,7 +5,7 @@ using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: FFTImplicitFreeSurfaceSolver
 using Printf
 
-architecture = CPU()
+architecture = GPU()
 
 save_fields_interval = 7days
 stop_time = 2years
@@ -315,7 +315,7 @@ averaged_outputs = (; v′b′, w′b′, B, U)
 
 simulation.output_writers[:checkpointer] = Checkpointer(model,
                                                         schedule = TimeInterval(1years),
-                                                        prefix = filename,
+                                                        prefix = joinpath(@__DIR__, "ASC_outputs", filename),
                                                         overwrite_existing = true)
 
 velocities_filename = joinpath(@__DIR__, "ASC_outputs", filename * "_velocities" * ".nc")
