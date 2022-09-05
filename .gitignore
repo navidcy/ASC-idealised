@@ -24,10 +24,12 @@ docs/site/
 # Manifest.toml
 
 .ipynb_checkpoints/
-
+*.e*
+*.o*
 *.nc
 *.jld2
 *.mp4
 *.svg
 *.png
 *.log
+*.sh

@@ -336,7 +336,7 @@ averaged_outputs = (; v′b′, w′b′, B, U)
 
 simulation.output_writers[:checkpointer] = Checkpointer(model,
                                                         schedule = TimeInterval(1years),
-                                                        prefix = filename,
+                                                        prefix = joinpath(@__DIR__, "ASC_outputs", filename),
                                                         overwrite_existing = true)
 
 velocities_filename = joinpath(@__DIR__, "ASC_outputs", filename * "_velocities" * ".nc")
