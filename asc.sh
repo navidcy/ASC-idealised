@@ -19,5 +19,6 @@ export JULIA_NUM_THREADS=48
 
 # Run Julia
 cd /g/data/hh5/tmp/txs156/ASC-idealised/
+julia --color=yes --project -e 'using Pkg; Pkg.instantiate(; verbose=true)'
 julia --color=yes --project asc.jl > $PBS_JOBID.log
 

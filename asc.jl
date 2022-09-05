@@ -5,10 +5,10 @@ using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: FFTImplicitFreeSurfaceSolver
 using Printf
 
-architecture = GPU()
+architecture = CPU()
 
 save_fields_interval = 7days
-stop_time = 2years
+stop_time = 30days
 Δt₀ = 5minutes
 
 filename = "asc_channel"
@@ -23,13 +23,13 @@ decay = Nz / Lz * 2
 z_faces(k) = - Lz * (tanh(decay * (k + Nz + 1/2)) - tanh(decay * (2Nz + 3/2))) / 
                     (tanh(decay * (Nz + 3/2)) - tanh(decay * (2Nz + 3/2)))
 
-grid = RectilinearGrid(architecture,
-                       topology = (Periodic, Bounded, Bounded), 
-                       size = (Nx, Ny, Nz),
-                       x = (-Lx/2, Lx/2),
-                       y = (-Ly/2, Ly/2),
-                       z = z_faces,
-                       halo = (3, 3, 3))
+underlying_grid = RectilinearGrid(architecture,
+                                  topology = (Periodic, Bounded, Bounded), 
+                                  size = (Nx, Ny, Nz),
+                                  x = (-Lx/2, Lx/2),
+                                  y = (-Ly/2, Ly/2),
+                                  z = z_faces,
+                                  halo = (3, 3, 3))
 
 ## Plot the z-grid (for testing purposes)
 #=
@@ -41,12 +41,11 @@ current_figure()
 =#
 
 ## Construct shelf immersed boundary
-H_deep = H = grid.Lz
-H_shelf = h = 500meters
-width_shelf = 150kilometers
+const H_deep = H = grid.Lz
+const H_shelf = h = 500meters
+const width_shelf = 150kilometers
 
 shelf(x, y) = -(H + h)/2 - (H - h)/2 * tanh(y / width_shelf)
-
 
 bathymetry(x, y) = shelf(x, y)
 
@@ -59,7 +58,7 @@ x_bump, y_bump = 0, 200kilometers
 bump(x, y) = bump_amplitude * exp(-((x - x_bump)^2 + (y - y_bump)^2) / 2width_bump^2)
 =#
 
-grid = ImmersedBoundaryGrid(grid, GridFittedBottom(bathymetry))
+grid = ImmersedBoundaryGrid(underlying_grid, GridFittedBottom(bathymetry))
 
 @info "Built a grid: $grid."
 
@@ -75,10 +74,10 @@ grid = ImmersedBoundaryGrid(grid, GridFittedBottom(bathymetry))
 κz = 5e-6        # [m² s⁻¹]
 
 vertical_diffusivities = VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(), ν=νz, κ=κz)
-horizontal_viscosity = HorizontalScalarDiffusivity(; ν)
-horizontal_biharmonic = HorizontalScalarBiharmonicDiffusivity(ν=κ₄h, κ=κ₄h)
-convective_adjustment = ConvectiveAdjustmentVerticalDiffusivity(convective_κz = 1.0,
-                                                                convective_νz = 0.0)
+horizontal_viscosity   = HorizontalScalarDiffusivity(; ν)
+horizontal_biharmonic  = HorizontalScalarBiharmonicDiffusivity(ν=κ₄h, κ=κ₄h)
+convective_adjustment  = ConvectiveAdjustmentVerticalDiffusivity(convective_κz = 1.0,
+                                                                 convective_νz = 0.0)
 
 #####
 ##### Boundary conditions
@@ -95,18 +94,18 @@ sponge_width = 100kilometers
 parameters = (Ly = Ly,
               Lz = Lz,
               polynya_width = polynya_width,
-              y_salt_shutoff = - (Ly/2 - polynya_width),  # shutoff location for salt flux [km]
-              Qsalt = 2.5e-3,                             # salt input (into the domain) [gm⁻² s⁻¹]
+              y_salt_shutoff = - (Ly/2 - polynya_width),  # shutoff location for salt flux [m]
+              Qsalt = 2.5e-3,                             # salt input (into the domain) [g m⁻² s⁻¹]
               τ = 0.075 / ρ₀,                             # surface kinematic wind stress [m² s⁻²]
 	          μ = 1 / 30days,                             # bottom drag damping time-scale [s⁻¹]
               ΔT = 5,                                     # surface temperature gradient [K]
               ΔS = 0.5,                                   # surface salinity gradient [K]
               H = Lz,                                     # domain depth [m]
               h = 1000.0,                                 # exponential decay scale of stable stratification [m]
-              y_sponge = Ly/2 - sponge_width,             # northern boundary of sponge layer [km]
+              y_sponge = Ly/2 - sponge_width,             # northern boundary of sponge layer [m]
               λT = 56days,                                # relaxation time scale for T, S  [s]
               λu = 26days,                                # relaxation time scale for u, v, and w [s]
-	      )
+	          )
 
 @inline function u_stress(i, j, grid, clock, model_fields, p)
     y = ynode(Center(), j, grid)
@@ -285,14 +284,15 @@ using Printf
 wall_clock = [time_ns()]
 
 function print_progress(sim)
-    @printf("[%05.2f%%] i: %d, t: %s, wall time: %s, max(u): (%6.3e, %6.3e, %6.3e) m/s, next Δt: %s\n",
+    @printf("[%05.2f%%] i: %d, t: %s, wall time: %s, next Δt: %s\n",
             100 * (sim.model.clock.time / sim.stop_time),
             sim.model.clock.iteration,
             prettytime(sim.model.clock.time),
             prettytime(1e-9 * (time_ns() - wall_clock[1])),
-            maximum(abs, sim.model.velocities.u),
-            maximum(abs, sim.model.velocities.v),
-            maximum(abs, sim.model.velocities.w),
+            # max(u): (%6.3e, %6.3e, %6.3e) m/s, 
+            # maximum(abs, sim.model.velocities.u),
+            # maximum(abs, sim.model.velocities.v),
+            # maximum(abs, sim.model.velocities.w),
             prettytime(sim.Δt))
 
     wall_clock[1] = time_ns()
