@@ -5,7 +5,7 @@ using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: FFTImplicitFreeSurfaceSolver
 using Printf
 
-architecture = CPU()
+architecture = GPU()
 
 save_fields_interval = 7days
 stop_time = 30days
@@ -41,7 +41,7 @@ current_figure()
 =#
 
 ## Construct shelf immersed boundary
-const H_deep = H = grid.Lz
+const H_deep = H = underlying_grid.Lz
 const H_shelf = h = 500meters
 const width_shelf = 150kilometers
 
@@ -342,12 +342,14 @@ simulation.output_writers[:checkpointer] = Checkpointer(model,
 velocities_filename = joinpath(@__DIR__, "ASC_outputs", filename * "_velocities" * ".nc")
 simulation.output_writers[:velocities] = NetCDFOutputWriter(model, (; u, v, w);
                                                             filename = velocities_filename,
-                                                            schedule = TimeInterval(save_fields_interval))
+                                                            schedule = TimeInterval(save_fields_interval),
+							    overwrite_existing = true)
 
 tracers_filename = joinpath(@__DIR__, "ASC_outputs", filename * "_tracers" * ".nc")
 simulation.output_writers[:tracers] = NetCDFOutputWriter(model, (; T, S, c);
                                                          filename = tracers_filename,
-                                                         schedule = TimeInterval(save_fields_interval))
+                                                         schedule = TimeInterval(save_fields_interval),
+							 overwrite_existing = true)
 #=
 slicers = (west = (1, :, :),
            east = (grid.Nx, :, :),
