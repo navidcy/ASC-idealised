@@ -383,6 +383,6 @@ simulation.output_writers[:averages] = JLD2OutputWriter(model, averaged_outputs,
 
 @info "Running the simulation..."
 
-run!(simulation, pickup=True)
+run!(simulation, pickup=true)
 
 @info "Simulation completed in " * prettytime(simulation.run_wall_time)
