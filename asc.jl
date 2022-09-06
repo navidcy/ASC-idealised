@@ -7,15 +7,17 @@ using Printf
 
 architecture = GPU()
 
-save_fields_interval = 7days
-stop_time = 30days
+save_fields_interval = 6hours
+stop_time = 21days
 Δt₀ = 5minutes
 
 filename = "asc_channel"
 
 Lx, Ly, Lz = 500kilometers, 600kilometers, 3kilometers
 
-Nx, Ny, Nz = 64, 64, 24
+## Leave Nz = 64 ##
+
+Nx, Ny, Nz = 64, 64, 64 
 
 decay = Nz / Lz * 2
 
@@ -43,7 +45,7 @@ current_figure()
 ## Construct shelf immersed boundary
 const H_deep = H = underlying_grid.Lz
 const H_shelf = h = 500meters
-const width_shelf = 150kilometers
+const width_shelf = 100kilometers
 
 shelf(x, y) = -(H + h)/2 - (H - h)/2 * tanh(y / width_shelf)
 
@@ -140,8 +142,8 @@ salt_flux_bc = FluxBoundaryCondition(salf_flux, discrete_form=true, parameters=p
 
 S_bcs = FieldBoundaryConditions(top = salt_flux_bc)
 
-@inline initial_temperature(y, z, p) = p.ΔT * (exp(z / p.h) - 1) + p.ΔT * y / p.Ly
-@inline initial_salinity(y, z, p) = p.ΔS * (exp(z / p.h) - 1) + p.ΔS * y / p.Ly
+@inline initial_temperature(y, z, p) = p.ΔT * (exp(z / p.h) - 1) + p.ΔT * y * 0
+@inline initial_salinity(y, z, p) = p.ΔS * (exp(z / p.h) - 1) + p.ΔS * y * 0
 
 @inline mask(y, p) = max(0.0, y - p.y_sponge) / (p.Ly/2 - p.y_sponge)
 
@@ -335,7 +337,7 @@ averaged_outputs = (; v′b′, w′b′, B, U)
 #####
 
 simulation.output_writers[:checkpointer] = Checkpointer(model,
-                                                        schedule = TimeInterval(1years),
+                                                        schedule = TimeInterval(7days),
                                                         prefix = joinpath(@__DIR__, "ASC_outputs", filename),
                                                         overwrite_existing = true)
 
@@ -343,13 +345,13 @@ velocities_filename = joinpath(@__DIR__, "ASC_outputs", filename * "_velocities"
 simulation.output_writers[:velocities] = NetCDFOutputWriter(model, (; u, v, w);
                                                             filename = velocities_filename,
                                                             schedule = TimeInterval(save_fields_interval),
-							    overwrite_existing = true)
+							    overwrite_existing = false)
 
 tracers_filename = joinpath(@__DIR__, "ASC_outputs", filename * "_tracers" * ".nc")
 simulation.output_writers[:tracers] = NetCDFOutputWriter(model, (; T, S, c);
                                                          filename = tracers_filename,
                                                          schedule = TimeInterval(save_fields_interval),
-							 overwrite_existing = true)
+							 overwrite_existing = false)
 #=
 slicers = (west = (1, :, :),
            east = (grid.Nx, :, :),
@@ -381,6 +383,6 @@ simulation.output_writers[:averages] = JLD2OutputWriter(model, averaged_outputs,
 
 @info "Running the simulation..."
 
-run!(simulation)
+run!(simulation, pickup=True)
 
 @info "Simulation completed in " * prettytime(simulation.run_wall_time)
