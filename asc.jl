@@ -3,44 +3,47 @@ using Oceananigans.Units
 using Oceananigans.Grids: xnode, ynode, znode
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: FFTImplicitFreeSurfaceSolver
+
+using SeawaterPolynomials.TEOS10
 using Printf
 
-architecture = GPU()
+architecture = CPU()
 
-save_fields_interval = 6hours
-stop_time = 21days
+output_path = joinpath(@__DIR__, "ASC_outputs/")
+
+save_fields_interval = 24hours
+
+stop_time =60days
 Δt₀ = 5minutes
 
 filename = "asc_channel"
 
 Lx, Ly, Lz = 500kilometers, 600kilometers, 3kilometers
 
-## Leave Nz = 64 ##
+Nx, Ny, Nz = 128, 128, 48
 
-Nx, Ny, Nz = 64, 64, 64 
+# # Stretched grid
+# A linearly streched grid in which the top grid cell has Δzₜₒₚ and every other cell
+# is bigger by a factor σ, e.g., `Δzₜₒₚ, Δzₜₒₚ * σ, Δzₜₒₚ * σ², ..., Δzₜₒₚ * σᴺᶻ⁻¹`,
+# so that the sum of all cell heights is `Lz`
+#
+# Given `Lz` and stretching factor `σ > 1` the top cell height is `Δzₜₒₚ = Lz * (σ - 1) / (σ^Nz - 1)`.
 
-decay = Nz / Lz * 2
+σ = 1.04 # linear stretching factor
 
-# location of z faces; z_faces(1) = - Lz, z_faces(Nz + 1) = 0
-z_faces(k) = - Lz * (tanh(decay * (k + Nz + 1/2)) - tanh(decay * (2Nz + 3/2))) / 
-                    (tanh(decay * (Nz + 3/2)) - tanh(decay * (2Nz + 3/2)))
+Δzₜₒₚ = Lz * (σ - 1) / (σ^Nz - 1)
+
+@info "With Lz = $Lz m, Nz = $Nz, and stretching factor σ = $σ the top z-grid spacing is $(round(Δzₜₒₚ, digits=2)) m."
+
+linearly_spaced_faces(k) = - Lz * (1 - σ^(1 - k + Nz)) / (1 - σ^Nz)
 
 underlying_grid = RectilinearGrid(architecture,
                                   topology = (Periodic, Bounded, Bounded), 
                                   size = (Nx, Ny, Nz),
                                   x = (-Lx/2, Lx/2),
                                   y = (-Ly/2, Ly/2),
-                                  z = z_faces,
-                                  halo = (3, 3, 3))
-
-## Plot the z-grid (for testing purposes)
-#=
-fig = Figure()
-ax = Axis(fig[1, 1], ylabel = "Depth (m)", xlabel = "Vertical spacing (m)")
-lines!(ax, grid.Δzᵃᵃᶜ[1:grid.Nz], grid.zᵃᵃᶜ[1:grid.Nz])
-scatter!(ax, grid.Δzᵃᵃᶜ[1:Nz], grid.zᵃᵃᶜ[1:Nz])
-current_figure()
-=#
+                                  z = linearly_spaced_faces,
+                                  halo = (4, 4, 4))
 
 ## Construct shelf immersed boundary
 const H_deep = H = underlying_grid.Lz
@@ -48,7 +51,6 @@ const H_shelf = h = 500meters
 const width_shelf = 100kilometers
 
 shelf(x, y) = -(H + h)/2 - (H - h)/2 * tanh(y / width_shelf)
-
 bathymetry(x, y) = shelf(x, y)
 
 #=
@@ -61,6 +63,27 @@ bump(x, y) = bump_amplitude * exp(-((x - x_bump)^2 + (y - y_bump)^2) / 2width_bu
 =#
 
 grid = ImmersedBoundaryGrid(underlying_grid, GridFittedBottom(bathymetry))
+
+## Plot the z-grid (for testing purposes)
+using CairoMakie
+
+fig = Figure()
+ax1 = Axis(fig[1, 1],
+           xlabel = "Vertical spacing (m)",
+           ylabel = "Depth (m)",
+           title = "vertical spacing")
+ax2 = Axis(fig[2, 1],
+           xlabel = "Latitude spacing (km)",
+           ylabel = "Depth (m)",
+           title = "immersed boundary")
+
+lines!(ax1, grid.Δzᵃᵃᶜ[1:grid.Nz], grid.zᵃᵃᶜ[1:grid.Nz])
+scatter!(ax1, grid.Δzᵃᵃᶜ[1:grid.Nz], grid.zᵃᵃᶜ[1:grid.Nz])
+
+lines!(ax2, grid.yᵃᶜᵃ[1:grid.Ny] / 1e3, grid.immersed_boundary.bottom_height[1, 1:grid.Ny],
+       linewidth = 3)
+
+save(output_path * "grid.png", fig)
 
 @info "Built a grid: $grid."
 
@@ -93,20 +116,19 @@ cᵖ = 3994.0   # [J K⁻¹] heat capacity
 polynya_width = 50kilometers
 sponge_width = 100kilometers
 
-parameters = (Ly = Ly,
-              Lz = Lz,
-              polynya_width = polynya_width,
-              y_salt_shutoff = - (Ly/2 - polynya_width),  # shutoff location for salt flux [m]
-              Qsalt = 2.5e-3,                             # salt input (into the domain) [g m⁻² s⁻¹]
-              τ = 0.075 / ρ₀,                             # surface kinematic wind stress [m² s⁻²]
-	          μ = 1 / 30days,                             # bottom drag damping time-scale [s⁻¹]
-              ΔT = 5,                                     # surface temperature gradient [K]
-              ΔS = 0.5,                                   # surface salinity gradient [K]
-              H = Lz,                                     # domain depth [m]
-              h = 1000.0,                                 # exponential decay scale of stable stratification [m]
-              y_sponge = Ly/2 - sponge_width,             # northern boundary of sponge layer [m]
-              λT = 56days,                                # relaxation time scale for T, S  [s]
-              λu = 26days,                                # relaxation time scale for u, v, and w [s]
+parameters = (; Ly,
+                Lz,
+                polynya_width,
+                y_salt_shutoff = - (Ly/2 - polynya_width),  # shutoff location for salt flux [m]
+                Qsalt = 2.5e-3,                             # salt input (into the domain) [g m⁻² s⁻¹]
+                τ = 0.075 / ρ₀,                             # surface kinematic wind stress [m² s⁻²]
+	            μ = 1 / 30days,                             # bottom drag damping time-scale [s⁻¹]
+                ΔT = 5,                                     # surface temperature gradient [K]
+                ΔS = 0.5,                                   # surface salinity gradient [K]
+                h = 1000.0,                                 # exponential decay scale of stable stratification [m]
+                y_sponge = Ly/2 - sponge_width,             # northern boundary of sponge layer [m]
+                λT = 56days,                                # relaxation time scale for T, S  [s]
+                λu = 26days,                                # relaxation time scale for u, v, and w [s]
 	          )
 
 @inline function u_stress(i, j, grid, clock, model_fields, p)
@@ -207,8 +229,10 @@ v_forcing = Forcing(v_relaxation, discrete_form = true, parameters = parameters)
 ##### Buoyancy model
 #####
 
-## We need the 25 term EOS from TS14 ##
-buoyancy = SeawaterBuoyancy(equation_of_state=LinearEquationOfState(thermal_expansion=2e-3, haline_contraction=5e-4))
+
+eos = LinearEquationOfState(thermal_expansion=2e-3, haline_contraction=5e-4)
+# eos = TEOS10EquationOfState()
+buoyancy = SeawaterBuoyancy(equation_of_state = eos)
 
 
 #####
@@ -221,8 +245,6 @@ fft_preconditioner = FFTImplicitFreeSurfaceSolver(grid.underlying_grid)
 free_surface = ImplicitFreeSurface(solver_method=:PreconditionedConjugateGradient, preconditioner=fft_preconditioner)
 # free_surface = ImplicitFreeSurface(solver_method=:HeptadiagonalIterativeSolver)
 
-## I assume this is where the sponge is implemented? ##
-
 model = HydrostaticFreeSurfaceModel(; grid,
                                     free_surface,
                                     coriolis,
@@ -232,8 +254,8 @@ model = HydrostaticFreeSurfaceModel(; grid,
                                                # horizontal_biharmonic,
                                                convective_adjustment),
                                     tracers = (:T, :S, :c),
-                                    momentum_advection = WENO5(; grid),
-                                    tracer_advection = WENO5(; grid),
+                                    momentum_advection = WENO(; grid),
+                                    tracer_advection = WENO(; grid),
                                     boundary_conditions = (S = S_bcs,
                                                            u = u_bcs,
                                                            v = v_bcs),
@@ -286,15 +308,15 @@ using Printf
 wall_clock = [time_ns()]
 
 function print_progress(sim)
-    @printf("[%05.2f%%] i: %d, t: %s, wall time: %s, next Δt: %s\n",
+    @printf("[%05.2f%%] i: %d, t: %s, wall time: %s, max(u): (%6.3e, %6.3e, %6.3e) m/s, CFL: %.2e, next Δt: %s\n",
             100 * (sim.model.clock.time / sim.stop_time),
             sim.model.clock.iteration,
             prettytime(sim.model.clock.time),
             prettytime(1e-9 * (time_ns() - wall_clock[1])),
-            # max(u): (%6.3e, %6.3e, %6.3e) m/s, 
-            # maximum(abs, sim.model.velocities.u),
-            # maximum(abs, sim.model.velocities.v),
-            # maximum(abs, sim.model.velocities.w),
+            maximum(abs, sim.model.velocities.u),
+            maximum(abs, sim.model.velocities.v),
+            maximum(abs, sim.model.velocities.w),
+            AdvectiveCFL(sim.Δt)(sim.model),
             prettytime(sim.Δt))
 
     wall_clock[1] = time_ns()
@@ -338,20 +360,21 @@ averaged_outputs = (; v′b′, w′b′, B, U)
 
 simulation.output_writers[:checkpointer] = Checkpointer(model,
                                                         schedule = TimeInterval(7days),
-                                                        prefix = joinpath(@__DIR__, "ASC_outputs", filename),
+                                                        dir = output_path,
+                                                        prefix = filename,
                                                         overwrite_existing = true)
 
-velocities_filename = joinpath(@__DIR__, "ASC_outputs", filename * "_velocities" * ".nc")
 simulation.output_writers[:velocities] = NetCDFOutputWriter(model, (; u, v, w);
-                                                            filename = velocities_filename,
+                                                            dir = output_path,
+                                                            filename = filename * "_velocities" * ".nc",
                                                             schedule = TimeInterval(save_fields_interval),
-							    overwrite_existing = false)
+                                                            overwrite_existing = true)
 
-tracers_filename = joinpath(@__DIR__, "ASC_outputs", filename * "_tracers" * ".nc")
 simulation.output_writers[:tracers] = NetCDFOutputWriter(model, (; T, S, c);
-                                                         filename = tracers_filename,
+                                                         dir = output_path,
+                                                         filename = filename * "_tracers" * ".nc",
                                                          schedule = TimeInterval(save_fields_interval),
-							 overwrite_existing = false)
+                                                         overwrite_existing = true)
 #=
 slicers = (west = (1, :, :),
            east = (grid.Nx, :, :),
@@ -383,6 +406,36 @@ simulation.output_writers[:averages] = JLD2OutputWriter(model, averaged_outputs,
 
 @info "Running the simulation..."
 
-run!(simulation, pickup=true)
+run!(simulation, pickup=false)
 
 @info "Simulation completed in " * prettytime(simulation.run_wall_time)
+
+
+# Plot few things
+
+ζ = Field(∂x(v) - ∂y(u))
+
+compute!(ζ)
+
+xζ, yζ, zζ = nodes(ζ)
+xc, yc, zc = nodes(T)
+
+fig = Figure()
+ax1 = Axis(fig[1, 1],
+           xlabel = "Longitude spacing (km)",
+           ylabel = "Latitude spacing (km)",
+           title = "vertical vorticity")
+ax2 = Axis(fig[2, 1],
+           xlabel = "Latitude spacing (km)",
+           ylabel = "Depth (m)",
+           title = "temperature")
+
+hmζ = heatmap!(ax1, xζ / 1e3, yζ / 1e3, interior(ζ)[:, :, Nz];
+               colormap = :balance,
+               colorrange = (-2e-4, 2e-4))
+Colorbar(fig[1, 2], hmζ, label = "s⁻¹")
+
+hmT = heatmap!(ax2, yc / 1e3, zc, interior(T)[1, :, :])
+Colorbar(fig[2, 2], hmT, label = "ᵒC")
+
+save(output_path * "flow_fields.png", fig)
