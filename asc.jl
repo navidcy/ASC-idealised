@@ -9,7 +9,7 @@ using CUDA, Printf
 
 using SeawaterPolynomials.TEOS10
 
-architecture = GPU()
+architecture = CPU()
 
 output_path = joinpath(@__DIR__, "ASC_outputs/")
 
@@ -18,7 +18,7 @@ save_fields_interval = 24hours
 stop_time =60days
 Δt₀ = 5minutes
 
-filename = "asc_channel"
+filename = "asc_channel_CPU"
 
 Lx, Ly, Lz = 500kilometers, 600kilometers, 3kilometers
 
@@ -432,12 +432,12 @@ ax2 = Axis(fig[2, 1],
            ylabel = "Depth (m)",
            title = "temperature")
 
-hmζ = heatmap!(ax1, xζ / 1e3, yζ / 1e3, interior(ζ)[:, :, Nz];
+hmζ = heatmap!(ax1, xζ / 1e3, yζ / 1e3, Array(interior(ζ))[:, :, Nz];
                colormap = :balance,
                colorrange = (-2e-4, 2e-4))
 Colorbar(fig[1, 2], hmζ, label = "s⁻¹")
 
-hmT = heatmap!(ax2, yc / 1e3, zc, interior(T)[1, :, :])
+hmT = heatmap!(ax2, yc / 1e3, zc, Array(interior(T))[1, :, :])
 Colorbar(fig[2, 2], hmT, label = "ᵒC")
 
 save(output_path * "flow_fields.png", fig)
