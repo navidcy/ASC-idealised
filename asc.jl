@@ -1,13 +1,15 @@
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: xnode, ynode, znode
+using Oceananigans.BuoyancyModels: LinearEquationOfState
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: FFTImplicitFreeSurfaceSolver
 
-using SeawaterPolynomials.TEOS10
-using Printf
+using CUDA, Printf
 
-architecture = CPU()
+using SeawaterPolynomials.TEOS10
+
+architecture = GPU()
 
 output_path = joinpath(@__DIR__, "ASC_outputs/")
 
@@ -77,10 +79,12 @@ ax2 = Axis(fig[2, 1],
            ylabel = "Depth (m)",
            title = "immersed boundary")
 
-lines!(ax1, grid.Δzᵃᵃᶜ[1:grid.Nz], grid.zᵃᵃᶜ[1:grid.Nz])
-scatter!(ax1, grid.Δzᵃᵃᶜ[1:grid.Nz], grid.zᵃᵃᶜ[1:grid.Nz])
+lines!(ax1, Array(grid.Δzᵃᵃᶜ[1:grid.Nz]), Array(grid.zᵃᵃᶜ[1:grid.Nz]))
+scatter!(ax1, Array(grid.Δzᵃᵃᶜ[1:grid.Nz]), Array(grid.zᵃᵃᶜ[1:grid.Nz]))
 
-lines!(ax2, grid.yᵃᶜᵃ[1:grid.Ny] / 1e3, grid.immersed_boundary.bottom_height[1, 1:grid.Ny],
+bottom = CUDA.@allowscalar Array(grid.immersed_boundary.bottom_height[1, 1:grid.Ny])
+
+lines!(ax2, Array(grid.yᵃᶜᵃ[1:grid.Ny]) / 1e3, bottom,
        linewidth = 3)
 
 save(output_path * "grid.png", fig)
@@ -228,7 +232,6 @@ v_forcing = Forcing(v_relaxation, discrete_form = true, parameters = parameters)
 #####
 ##### Buoyancy model
 #####
-
 
 eos = LinearEquationOfState(thermal_expansion=2e-3, haline_contraction=5e-4)
 # eos = TEOS10EquationOfState()
@@ -414,7 +417,6 @@ run!(simulation, pickup=false)
 # Plot few things
 
 ζ = Field(∂x(v) - ∂y(u))
-
 compute!(ζ)
 
 xζ, yζ, zζ = nodes(ζ)
