@@ -22,7 +22,7 @@ filename = "asc_channel_CPU"
 
 Lx, Ly, Lz = 500kilometers, 600kilometers, 3kilometers
 
-Nx, Ny, Nz = 128, 128, 48
+Nx, Ny, Nz = 128, 128, 64
 
 # # Stretched grid
 # A linearly streched grid in which the top grid cell has Δzₜₒₚ and every other cell
