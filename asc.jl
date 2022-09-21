@@ -9,6 +9,7 @@ using Oceananigans.Models.HydrostaticFreeSurfaceModels: FFTImplicitFreeSurfaceSo
 using CUDA, Printf
 
 using SeawaterPolynomials.TEOS10
+using Statistics: mean
 
 architecture = GPU()
 
@@ -427,6 +428,18 @@ run!(simulation, pickup=false)
 ζ = Field(∂x(v) - ∂y(u))
 compute!(ζ)
 
+""" replace immersed boundary with NaNs for better visualization """
+function visualize(field, level, dims)
+    (dims == 1) && (idx = (level, :, :))
+    (dims == 2) && (idx = (:, level, :))
+    (dims == 3) && (idx = (:, :, level))
+
+    r = deepcopy(Array(interior(field)))[idx...]
+    r[r.==0] .= NaN
+
+    return r
+end
+
 grid_cpu = on_architecture(CPU(), grid)
 
 xζ, yζ, zζ = nodes(location(ζ), grid_cpu)
@@ -440,23 +453,22 @@ axζ = Axis(fig[1, 1],
 axT = Axis(fig[2, 1],
            xlabel = "Latitude spacing (km)",
            ylabel = "Depth (m)",
-           title = "temperature")
+           title = "temperature slice")
 
 axc = Axis(fig[3, 1],
            xlabel = "Latitude spacing (km)",
            ylabel = "Depth (m)",
-           title = "tracer")
+           title = "zonal mean of tracer")
 
-hmζ = heatmap!(axζ, xζ / 1e3, yζ / 1e3, Array(interior(ζ))[:, :, Nz];
+hmζ = heatmap!(axζ, xζ / 1e3, yζ / 1e3, visualize(ζ, Nz, 3);
                colormap = :balance,
                colorrange = (-2e-4, 2e-4))
 Colorbar(fig[1, 2], hmζ, label = "s⁻¹")
 
-hmT = heatmap!(axT, yc / 1e3, zc, Array(interior(T))[1, :, :])
+hmT = heatmap!(axT, yc / 1e3, zc, visualize(T, 1, 1))
 Colorbar(fig[2, 2], hmT, label = "ᵒC")
 
-hmc = heatmap!(axc, yc / 1e3, zc, Array(interior(c))[1, :, :])
+hmc = heatmap!(axc, yc / 1e3, zc, mean(visualize(c, :, 1), dims=1)[1, :, :])
 Colorbar(fig[3, 2], hmc)
 
 save(output_path * "flow_fields.png", fig)
-
