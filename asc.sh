@@ -1,8 +1,8 @@
 #!/bin/bash
-#PBS -q gpuvolta
+#PBS -q normalbw
 #PBS -P e14
-#PBS -l ncpus=12
-#PBS -l ngpus=1
+#PBS -l ncpus=28
+##PBS -l ngpus=1
 #PBS -l mem=256GB
 #PBS -l jobfs=100GB
 #PBS -l walltime=24:00:00
@@ -19,6 +19,6 @@ export JULIA_NUM_THREADS=48
 
 # Run Julia
 cd /g/data/hh5/tmp/txs156/ASC-idealised/
-# julia --color=yes --project -e 'using Pkg; Pkg.instantiate(; verbose=true)'
-julia --color=yes --project asc.jl > $PBS_JOBID.log
+#julia --color=yes --project -e 'using Pkg; Pkg.instantiate(; verbose=true)'
+julia  --check-bounds=no --color=yes --project asc.jl > $PBS_JOBID.log
 
