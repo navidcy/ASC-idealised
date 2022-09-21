@@ -1,5 +1,6 @@
 using Oceananigans
 using Oceananigans.Units
+using Oceananigans.Grids: on_architecture
 using Oceananigans.Grids: xnode, ynode, znode
 using Oceananigans.BuoyancyModels: LinearEquationOfState
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
@@ -16,7 +17,7 @@ output_path = joinpath(@__DIR__, "ASC_outputs/")
 save_fields_interval = 24hours
 save_checkpointer_interval = 30days
 
-stop_time =60days
+stop_time = 60days
 Δt₀ = 1minutes
 
 filename = "asc_channel_" * string(typeof(architecture))
@@ -426,8 +427,10 @@ run!(simulation, pickup=false)
 ζ = Field(∂x(v) - ∂y(u))
 compute!(ζ)
 
-xζ, yζ, zζ = nodes(ζ)
-xc, yc, zc = nodes(T)
+grid_cpu = on_architecture(CPU(), grid)
+
+xζ, yζ, zζ = nodes(location(ζ), grid_cpu)
+xc, yc, zc = nodes(location(c), grid_cpu)
 
 fig = Figure()
 axζ = Axis(fig[1, 1],
@@ -456,3 +459,4 @@ hmc = heatmap!(axc, yc / 1e3, zc, Array(interior(c))[1, :, :])
 Colorbar(fig[3, 2], hmc)
 
 save(output_path * "flow_fields.png", fig)
+
