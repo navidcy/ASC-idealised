@@ -14,6 +14,7 @@ architecture = GPU()
 output_path = joinpath(@__DIR__, "ASC_outputs/")
 
 save_fields_interval = 24hours
+save_checkpointer_interval = 30days
 
 stop_time =60days
 Δt₀ = 1minutes
@@ -368,7 +369,7 @@ averaged_outputs = (; v′b′, w′b′, B, U)
 #####
 
 simulation.output_writers[:checkpointer] = Checkpointer(model,
-                                                        schedule = TimeInterval(7days),
+                                                        schedule = TimeInterval(save_checkpointer_interval),
                                                         dir = output_path,
                                                         prefix = filename,
                                                         overwrite_existing = true)
