@@ -319,17 +319,17 @@ using Printf
 wall_clock = [time_ns()]
 
 function print_progress(sim)
-    @sprintf("[%05.2f%%] i: %d, t: %s, wall time: %s, CFL: %.2e, next Δt: %s\n",
-             100 * (sim.model.clock.time / sim.stop_time),
-             sim.model.clock.iteration,
-             prettytime(sim.model.clock.time),
-             prettytime(1e-9 * (time_ns() - wall_clock[1])),
-            #  # max(u): (%6.3e, %6.3e, %6.3e) m/s, 
-            #  maximum(abs, sim.model.velocities.u),
-            #  maximum(abs, sim.model.velocities.v),
-            #  maximum(abs, sim.model.velocities.w),
-             AdvectiveCFL(sim.Δt)(sim.model),
-             prettytime(sim.Δt))
+    @info @printf("[%05.2f%%] i: %d, t: %s, wall time: %s, CFL: %.2e, next Δt: %s\n",
+                   100 * (sim.model.clock.time / sim.stop_time),
+                   sim.model.clock.iteration,
+                   prettytime(sim.model.clock.time),
+                   prettytime(1e-9 * (time_ns() - wall_clock[1])),
+                   #  # max(u): (%6.3e, %6.3e, %6.3e) m/s, 
+                   #  maximum(abs, sim.model.velocities.u),
+                   #  maximum(abs, sim.model.velocities.v),
+                   #  maximum(abs, sim.model.velocities.w),
+                   AdvectiveCFL(sim.Δt)(sim.model),
+                   prettytime(sim.Δt))
 
     wall_clock[1] = time_ns()
     
