@@ -1,5 +1,6 @@
 using Oceananigans
 using Oceananigans.Units
+using Oceananigans.Grids: on_architecture
 using Oceananigans.Grids: xnode, ynode, znode
 using Oceananigans.BuoyancyModels: LinearEquationOfState
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
@@ -8,17 +9,19 @@ using Oceananigans.Models.HydrostaticFreeSurfaceModels: FFTImplicitFreeSurfaceSo
 using CUDA, Printf
 
 using SeawaterPolynomials.TEOS10
+using Statistics: mean
 
-architecture = CPU()
+architecture = GPU()
 
 output_path = joinpath(@__DIR__, "ASC_outputs/")
 
 save_fields_interval = 24hours
+save_checkpointer_interval = 30days
 
-stop_time =60days
-Δt₀ = 5minutes
+stop_time = 60days
+Δt₀ = 1minutes
 
-filename = "asc_channel_CPU"
+filename = "asc_channel_" * string(typeof(architecture))
 
 Lx, Ly, Lz = 500kilometers, 600kilometers, 3kilometers
 
@@ -47,6 +50,9 @@ underlying_grid = RectilinearGrid(architecture,
                                   z = linearly_spaced_faces,
                                   halo = (4, 4, 4))
 
+# a check to see if grid's z-spacing was constructed as expected
+!(CUDA.@allowscalar underlying_grid.Δzᵃᵃᶜ[Nz] ≈ Δzₜₒₚ) && error("Something went wrong with grid; Δzₜₒₚ not as expected.")
+
 ## Construct shelf immersed boundary
 const H_deep = H = underlying_grid.Lz
 const H_shelf = h = 500meters
@@ -64,7 +70,9 @@ x_bump, y_bump = 0, 200kilometers
 bump(x, y) = bump_amplitude * exp(-((x - x_bump)^2 + (y - y_bump)^2) / 2width_bump^2)
 =#
 
-grid = ImmersedBoundaryGrid(underlying_grid, GridFittedBottom(bathymetry))
+@show grid = ImmersedBoundaryGrid(underlying_grid, GridFittedBottom(bathymetry))
+
+flush(stdout)
 
 ## Plot the z-grid (for testing purposes)
 using CairoMakie
@@ -168,8 +176,8 @@ salt_flux_bc = FluxBoundaryCondition(salf_flux, discrete_form=true, parameters=p
 
 S_bcs = FieldBoundaryConditions(top = salt_flux_bc)
 
-@inline initial_temperature(y, z, p) = p.ΔT * (exp(z / p.h) - 1) + p.ΔT * y * 0
-@inline initial_salinity(y, z, p) = p.ΔS * (exp(z / p.h) - 1) + p.ΔS * y * 0
+@inline initial_temperature(z, p) = p.ΔT * (exp(z / p.h) - 1)
+@inline initial_salinity(z, p)    = p.ΔS * (exp(z / p.h) - 1)
 
 @inline mask(y, p) = max(0.0, y - p.y_sponge) / (p.Ly/2 - p.y_sponge)
 
@@ -177,7 +185,7 @@ S_bcs = FieldBoundaryConditions(top = salt_flux_bc)
     timescale = p.λT
     y = ynode(Center(), j, grid)
     z = znode(Center(), k, grid)
-    target_T = initial_temperature(y, z, p)
+    target_T = initial_temperature(z, p)
     T = @inbounds model_fields.T[i, j, k]
 
     return -1 / timescale * mask(y, p) * (T - target_T)
@@ -187,7 +195,7 @@ end
     timescale = p.λT
     y = ynode(Center(), j, grid)
     z = znode(Center(), k, grid)
-    target_S = initial_salinity(y, z, p)
+    target_S = initial_salinity(z, p)
     S = @inbounds model_fields.S[i, j, k]
 
     return - 1 / timescale * mask(y, p) * (S - target_S)
@@ -244,9 +252,9 @@ buoyancy = SeawaterBuoyancy(equation_of_state = eos)
 
 @info "Building a model..."
 
-fft_preconditioner = FFTImplicitFreeSurfaceSolver(grid.underlying_grid)
-free_surface = ImplicitFreeSurface(solver_method=:PreconditionedConjugateGradient, preconditioner=fft_preconditioner)
-# free_surface = ImplicitFreeSurface(solver_method=:HeptadiagonalIterativeSolver)
+# fft_preconditioner = FFTImplicitFreeSurfaceSolver(grid.underlying_grid)
+# free_surface = ImplicitFreeSurface(solver_method=:PreconditionedConjugateGradient, preconditioner=fft_preconditioner)
+free_surface = ImplicitFreeSurface(solver_method=:HeptadiagonalIterativeSolver)
 
 model = HydrostaticFreeSurfaceModel(; grid,
                                     free_surface,
@@ -281,8 +289,8 @@ uᵢ(x, y, z) = ε(1e-8)
 vᵢ(x, y, z) = ε(1e-8)
 wᵢ(x, y, z) = ε(1e-8)
 
-Tᵢ(x, y, z) = initial_temperature(y, z, parameters) + ε(1e-8)
-Sᵢ(x, y, z) = initial_salinity(y, z, parameters) + ε(1e-8)
+Tᵢ(x, y, z) = initial_temperature(z, parameters) + ε(1e-8)
+Sᵢ(x, y, z) = initial_salinity(z, parameters) + ε(1e-8)
 
 # horizontal and vertical width of passive tracer initial distribution
 Δz = 100               # [m]
@@ -311,20 +319,21 @@ using Printf
 wall_clock = [time_ns()]
 
 function print_progress(sim)
-    @printf("[%05.2f%%] i: %d, t: %s, wall time: %s, max(u): (%6.3e, %6.3e, %6.3e) m/s, CFL: %.2e, next Δt: %s\n",
-            100 * (sim.model.clock.time / sim.stop_time),
-            sim.model.clock.iteration,
-            prettytime(sim.model.clock.time),
-            prettytime(1e-9 * (time_ns() - wall_clock[1])),
-            maximum(abs, sim.model.velocities.u),
-            maximum(abs, sim.model.velocities.v),
-            maximum(abs, sim.model.velocities.w),
-            AdvectiveCFL(sim.Δt)(sim.model),
-            prettytime(sim.Δt))
+    @sprintf("[%05.2f%%] i: %d, t: %s, wall time: %s, CFL: %.2e, next Δt: %s\n",
+             100 * (sim.model.clock.time / sim.stop_time),
+             sim.model.clock.iteration,
+             prettytime(sim.model.clock.time),
+             prettytime(1e-9 * (time_ns() - wall_clock[1])),
+            #  # max(u): (%6.3e, %6.3e, %6.3e) m/s, 
+            #  maximum(abs, sim.model.velocities.u),
+            #  maximum(abs, sim.model.velocities.v),
+            #  maximum(abs, sim.model.velocities.w),
+             AdvectiveCFL(sim.Δt)(sim.model),
+             prettytime(sim.Δt))
 
     wall_clock[1] = time_ns()
     
-    return nothing
+    flush(stdout)
 end
 
 simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterval(100))
@@ -362,7 +371,7 @@ averaged_outputs = (; v′b′, w′b′, B, U)
 #####
 
 simulation.output_writers[:checkpointer] = Checkpointer(model,
-                                                        schedule = TimeInterval(7days),
+                                                        schedule = TimeInterval(save_checkpointer_interval),
                                                         dir = output_path,
                                                         prefix = filename,
                                                         overwrite_existing = true)
@@ -419,25 +428,47 @@ run!(simulation, pickup=false)
 ζ = Field(∂x(v) - ∂y(u))
 compute!(ζ)
 
-xζ, yζ, zζ = nodes(ζ)
-xc, yc, zc = nodes(T)
+""" replace immersed boundary with NaNs for better visualization """
+function visualize(field, level, dims)
+    (dims == 1) && (idx = (level, :, :))
+    (dims == 2) && (idx = (:, level, :))
+    (dims == 3) && (idx = (:, :, level))
+
+    r = deepcopy(Array(interior(field)))[idx...]
+    r[r.==0] .= NaN
+
+    return r
+end
+
+grid_cpu = on_architecture(CPU(), grid)
+
+xζ, yζ, zζ = nodes(location(ζ), grid_cpu)
+xc, yc, zc = nodes(location(c), grid_cpu)
 
 fig = Figure()
-ax1 = Axis(fig[1, 1],
+axζ = Axis(fig[1, 1],
            xlabel = "Longitude spacing (km)",
            ylabel = "Latitude spacing (km)",
            title = "vertical vorticity")
-ax2 = Axis(fig[2, 1],
+axT = Axis(fig[2, 1],
            xlabel = "Latitude spacing (km)",
            ylabel = "Depth (m)",
-           title = "temperature")
+           title = "temperature slice")
 
-hmζ = heatmap!(ax1, xζ / 1e3, yζ / 1e3, Array(interior(ζ))[:, :, Nz];
+axc = Axis(fig[3, 1],
+           xlabel = "Latitude spacing (km)",
+           ylabel = "Depth (m)",
+           title = "zonal mean of tracer")
+
+hmζ = heatmap!(axζ, xζ / 1e3, yζ / 1e3, visualize(ζ, Nz, 3);
                colormap = :balance,
                colorrange = (-2e-4, 2e-4))
 Colorbar(fig[1, 2], hmζ, label = "s⁻¹")
 
-hmT = heatmap!(ax2, yc / 1e3, zc, Array(interior(T))[1, :, :])
+hmT = heatmap!(axT, yc / 1e3, zc, visualize(T, 1, 1))
 Colorbar(fig[2, 2], hmT, label = "ᵒC")
+
+hmc = heatmap!(axc, yc / 1e3, zc, mean(visualize(c, :, 1), dims=1)[1, :, :])
+Colorbar(fig[3, 2], hmc)
 
 save(output_path * "flow_fields.png", fig)
