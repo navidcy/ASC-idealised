@@ -33,4 +33,5 @@ docs/site/
 *.png
 *.log
 *.sh
-!TS_profiles
+# Except
+!TS_profiles/TS_profiles.nc
