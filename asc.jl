@@ -13,7 +13,7 @@ using Statistics: mean
 
 is_this_a_restart = false
 
-architecture = CPU()
+architecture = GPU()
 
 output_path = joinpath(@__DIR__, "outputs/")
 
