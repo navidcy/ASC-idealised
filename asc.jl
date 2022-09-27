@@ -11,9 +11,11 @@ using CUDA, Printf
 using SeawaterPolynomials.TEOS10
 using Statistics: mean
 
+is_this_a_restart = true
+
 architecture = GPU()
 
-output_path = joinpath(@__DIR__, "ASC_outputs/")
+output_path = joinpath(@__DIR__, "outputs/")
 
 save_fields_interval = 24hours
 save_checkpointer_interval = 30days
@@ -370,23 +372,25 @@ averaged_outputs = (; v′b′, w′b′, B, U)
 ##### Build checkpointer and output writer
 #####
 
-simulation.output_writers[:checkpointer] = Checkpointer(model,
+overwrite_existing = is_this_a_restart ? false : true
+
+simulation.output_writers[:checkpointer] = Checkpointer(model;
                                                         schedule = TimeInterval(save_checkpointer_interval),
                                                         dir = output_path,
                                                         prefix = filename,
-                                                        overwrite_existing = true)
+                                                        overwrite_existing)
 
 simulation.output_writers[:velocities] = NetCDFOutputWriter(model, (; u, v, w);
                                                             dir = output_path,
                                                             filename = filename * "_velocities" * ".nc",
                                                             schedule = TimeInterval(save_fields_interval),
-                                                            overwrite_existing = true)
+                                                            overwrite_existing)
 
 simulation.output_writers[:tracers] = NetCDFOutputWriter(model, (; T, S, c);
                                                          dir = output_path,
                                                          filename = filename * "_tracers" * ".nc",
                                                          schedule = TimeInterval(save_fields_interval),
-                                                         overwrite_existing = true)
+                                                         overwrite_existing)
 #=
 slicers = (west = (1, :, :),
            east = (grid.Nx, :, :),
@@ -418,7 +422,9 @@ simulation.output_writers[:averages] = JLD2OutputWriter(model, averaged_outputs,
 
 @info "Running the simulation..."
 
-run!(simulation, pickup=false)
+pickup = is_this_a_restart ? true : false
+
+run!(simulation; pickup)
 
 @info "Simulation completed in " * prettytime(simulation.run_wall_time)
 
