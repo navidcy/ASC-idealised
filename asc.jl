@@ -2,7 +2,7 @@ using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: on_architecture
 using Oceananigans.Grids: xnode, ynode, znode
-using Oceananigans.BuoyancyModels: LinearEquationOfState
+using Oceananigans.BuoyancyModels: LinearEquationOfState, BuoyancyField
 using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: FFTImplicitFreeSurfaceSolver
 
@@ -11,9 +11,9 @@ using CUDA, Printf
 using SeawaterPolynomials.TEOS10
 using Statistics: mean
 
-is_this_a_restart = true
+is_this_a_restart = false
 
-architecture = GPU()
+architecture = CPU()
 
 output_path = joinpath(@__DIR__, "outputs/")
 
@@ -348,6 +348,8 @@ simulation.callbacks[:print_progress] = Callback(print_progress, IterationInterv
 u, v, w = model.velocities
 T, S, c = model.tracers.T, model.tracers.S, model.tracers.c
 
+b = BuoyancyField(model)
+
 #=
 ζ = Field(∂x(v) - ∂y(u))
 
@@ -386,7 +388,7 @@ simulation.output_writers[:velocities] = NetCDFOutputWriter(model, (; u, v, w);
                                                             schedule = TimeInterval(save_fields_interval),
                                                             overwrite_existing)
 
-simulation.output_writers[:tracers] = NetCDFOutputWriter(model, (; T, S, c);
+simulation.output_writers[:tracers] = NetCDFOutputWriter(model, (; T, S, b, c);
                                                          dir = output_path,
                                                          filename = filename * "_tracers" * ".nc",
                                                          schedule = TimeInterval(save_fields_interval),
