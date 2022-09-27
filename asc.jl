@@ -25,9 +25,9 @@ stop_time = 60days
 
 filename = "asc_channel_" * string(typeof(architecture))
 
-Lx, Ly, Lz = 500kilometers, 600kilometers, 3kilometers
+Lx, Ly, Lz = 1000kilometers, 600kilometers, 3kilometers
 
-Nx, Ny, Nz = 128, 128, 64
+Nx, Ny, Nz = 256, 128, 64
 
 # # Stretched grid
 # A linearly streched grid in which the top grid cell has Δzₜₒₚ and every other cell
@@ -128,7 +128,7 @@ cᵖ = 3994.0   # [J K⁻¹] heat capacity
 ρ₀ = 1024.0   # [kg m⁻³] reference density
 
 polynya_width = 50kilometers
-sponge_width = 100kilometers
+sponge_width  = 50kilometers
 
 parameters = (; Ly,
                 Lz,
