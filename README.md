@@ -2,10 +2,13 @@
 
 An idealised Antarctic Slope Current configuration in [Oceananigans.jl](http://github.com/CliMA/Oceananigans.jl) similar to the one used by [Stewart and Thompson, *GRL*, 2014](https://doi.org/10.1002/2014GL062281).
 
+<img src="https://github.com/navidcy/ASC-idealised/assets/7112768/8f71624e-90d3-4c66-82b5-778f3a62b4fa"  width="800">
+
 Please open an [issue](https://github.com/navidcy/ASC-idealised/issues) or start a new [discussion](https://github.com/navidcy/ASC-idealised/discussions/17) for any ideas, concerns, suggestions, or questions you may have!
 
 To run this on NCI's HPC first from a login node (that has internet access) we clone the repository and instantiate
 the project (i.e., download all necessary dependencies).
+
 
 ```
 git clone ...
