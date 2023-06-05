@@ -3,7 +3,7 @@ using Oceananigans.Units
 using Oceananigans.Grids: on_architecture
 using Oceananigans.Grids: xnode, ynode, znode
 using Oceananigans.BuoyancyModels: LinearEquationOfState, BuoyancyField
-using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom
+using Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, GridFittedBottom, PartialCellBottom
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: FFTImplicitFreeSurfaceSolver
 
 using CUDA, Printf
@@ -13,7 +13,7 @@ using Statistics: mean
 
 is_this_a_restart = false
 
-architecture = GPU()
+architecture = CPU()
 
 output_path = joinpath(@__DIR__, "outputs/")
 
@@ -72,7 +72,7 @@ x_bump, y_bump = 0, 200kilometers
 bump(x, y) = bump_amplitude * exp(-((x - x_bump)^2 + (y - y_bump)^2) / 2width_bump^2)
 =#
 
-@show grid = ImmersedBoundaryGrid(underlying_grid, GridFittedBottom(bathymetry))
+@show grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(bathymetry))
 
 flush(stdout)
 
